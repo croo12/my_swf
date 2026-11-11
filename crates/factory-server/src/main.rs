@@ -231,12 +231,13 @@ async fn job_status(State(s):State<Arc<AppState>>,headers:HeaderMap,RoutePath(id
 async fn main()->Result<(),Box<dyn std::error::Error>> {
     let token=env::var("FACTORY_API_TOKEN").map_err(|_|"Set FACTORY_API_TOKEN (a long random secret)")?;
     if token.len()<24 {return Err("FACTORY_API_TOKEN must be at least 24 characters".into());}
-    let repo=PathBuf::from(env::var("FACTORY_REPO_PATH").map_err(|_|"Set FACTORY_REPO_PATH")?).canonicalize()?;
+    let repo=std::path::absolute(env::var("FACTORY_REPO_PATH").map_err(|_|"Set FACTORY_REPO_PATH")?)?;
     if !repo.is_dir() {return Err("FACTORY_REPO_PATH must be a directory".into());}
     let data_dir=PathBuf::from(env::var("FACTORY_DATA_DIR").unwrap_or_else(|_|"./data".into()));
     fs::create_dir_all(data_dir.join("approved")).await?;
     fs::create_dir_all(data_dir.join("jobs")).await?;
-    let data_dir=data_dir.canonicalize()?; // Keep Herdr worktree paths absolute.
+    // std::path::absolute, not canonicalize: on Windows canonicalize yields \\?\ verbatim paths that git and other CLIs reject.
+    let data_dir=std::path::absolute(data_dir)?;
     let state=Arc::new(AppState{repository:repo,data_dir,herdr_bin:env::var("HERDR_BIN").unwrap_or_else(|_|"herdr".into()),api_token:token,guard:Arc::new(Mutex::new(())),jobs:Arc::new(Mutex::new(HashMap::new()))});
     let app=Router::new()
         .route("/api/status",get(status))
