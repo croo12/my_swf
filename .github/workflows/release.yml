@@ -1,0 +1,102 @@
+name: Release
+
+# Push a tag like v0.1.0 to build and publish a GitHub Release.
+# Builds are unsigned: Windows shows a SmartScreen warning and macOS requires "Open Anyway".
+# Android is not built here yet (needs a signing keystore in repository secrets).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the release if it does not exist
+        run: gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Software Factory $TAG" --generate-notes
+
+  client:
+    name: client (${{ matrix.name }})
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS universal
+            os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin
+          - name: Windows x64
+            os: windows-latest
+            rust-targets: ""
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/client/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+      - name: Install client dependencies
+        working-directory: apps/client
+        run: npm ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/client
+          tagName: ${{ github.ref_name }}
+          args: ${{ matrix.args }}
+
+  server:
+    name: server (${{ matrix.target }})
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build factory-server
+        run: cargo build -p factory-server --release --locked --target ${{ matrix.target }}
+      - name: Package and upload
+        shell: bash
+        run: |
+          name="factory-server-${TAG}-${{ matrix.target }}"
+          mkdir "$name"
+          cp README.md docs/ARCHITECTURE.md "$name/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/factory-server.exe" "$name/"
+            7z a "$name.zip" "$name" >/dev/null
+            gh release upload "$TAG" "$name.zip" --clobber
+          else
+            cp "target/${{ matrix.target }}/release/factory-server" "$name/"
+            cp -R scripts "$name/"
+            tar -czf "$name.tar.gz" "$name"
+            gh release upload "$TAG" "$name.tar.gz" --clobber
+          fi
