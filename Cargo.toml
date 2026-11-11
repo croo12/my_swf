@@ -1,0 +1,5 @@
+[workspace]
+resolver = "2"
+members = ["crates/factory-server"]
+# Tauri uses its own target-specific build graph (macOS / Windows / Android).
+exclude = ["apps/client/src-tauri"]
