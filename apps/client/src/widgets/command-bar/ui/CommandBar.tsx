@@ -60,8 +60,12 @@ export function CommandBar() {
         <button className="btn" title="요청을 메모로 남깁니다 (Ctrl+Enter)" onClick={record}>
           메모로 기록
         </button>
-        <button className="btn primary" title="Codex에 이 요청으로 변경안을 만들게 합니다" onClick={requestPlan}>
-          ✦ Herdr 계획 요청
+        <button
+          className="btn primary"
+          title="Codex가 필요한 모듈과 배치를 제안합니다. 제안은 서버에서 검증된 것만 돌아옵니다"
+          onClick={requestPlan}
+        >
+          ✦ 계획 요청
         </button>
       </div>
       <div className="requests">

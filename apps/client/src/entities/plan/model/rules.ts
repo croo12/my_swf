@@ -1,6 +1,6 @@
 // Validation of plans and of the relations inside them.
 import { isDirectLayer, isLayer, layerIndex, layerOf, sliceOf } from './path';
-import type { Plan, PlanEdge, PlanNode, PlanRequest } from './types';
+import { MODULE_KINDS, type ModuleKind, type Plan, type PlanEdge, type PlanNode, type PlanRequest } from './types';
 
 /** An "imports" edge may only point to a lower layer, or stay within one slice (or within app/shared). */
 export function isInvalidEdge(edge: PlanEdge, nodes: PlanNode[]): boolean {
@@ -36,7 +36,16 @@ export function normalizeImported(data: unknown): Plan {
       ...n,
       id: String(n.id || 'import-' + i),
       path,
+      name: typeof n.name === 'string' && n.name.trim() ? n.name.trim() : undefined,
+      // Nodes observed on disk by the repository scan are existing modules.
+      kind: MODULE_KINDS.includes(n.kind as ModuleKind)
+        ? (n.kind as ModuleKind)
+        : n.source === 'filesystem'
+          ? 'existing'
+          : 'new',
       description: String(n.description ?? ''),
+      behaviors: stringArray(n.behaviors),
+      files: stringArray(n.files),
       inputs: stringArray(n.inputs),
       outputs: stringArray(n.outputs),
       x: Number(n.x) || 0,
@@ -55,6 +64,7 @@ export function normalizeImported(data: unknown): Plan {
     }));
   return {
     version: Number(doc.version || 1),
+    summary: typeof doc.summary === 'string' ? doc.summary : undefined,
     nodes,
     edges,
     requests: Array.isArray(doc.requests) ? (doc.requests as PlanRequest[]) : [],

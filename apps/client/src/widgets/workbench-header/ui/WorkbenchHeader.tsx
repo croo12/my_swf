@@ -2,14 +2,7 @@ import { useRef } from 'react';
 import { EDGE_TYPES, LAYERS, planStore, selectionStore, type Layer } from '@/entities/plan';
 import { analyzeRepository } from '@/features/analyze-repository';
 import { openConnectionDialog, serverStatusStore } from '@/features/connect-server';
-import {
-  addNode,
-  autoLayout,
-  edgeTypeStore,
-  resetToSample,
-  toggleConnectFromSelected,
-  undo,
-} from '@/features/edit-graph';
+import { addNode, autoLayout, clearPlan, edgeTypeStore, toggleConnectFromSelected, undo } from '@/features/edit-graph';
 import { exportPlan, importPlanFile } from '@/features/plan-transfer';
 import { approveOnServer, loadFromServer, saveToServer } from '@/features/server-sync';
 import { setView, viewStore } from '@/features/switch-view';
@@ -128,7 +121,7 @@ export function WorkbenchHeader({ onJumpToLayer }: { onJumpToLayer: (layer: Laye
           items={[
             { label: 'JSON 불러오기', onSelect: () => fileRef.current?.click() },
             { label: 'JSON 내보내기', onSelect: exportPlan },
-            { label: '샘플로 초기화', danger: true, onSelect: resetToSample },
+            { label: '계획 비우기', hint: '모든 모듈을 지우고 처음부터', danger: true, onSelect: clearPlan },
           ]}
         />
         <input

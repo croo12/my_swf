@@ -5,6 +5,13 @@ import { createStore } from '@/shared/lib';
 import { notify } from '@/shared/ui/toast';
 
 const POLL_MS = 3000;
+const STATUS_LABELS: Record<string, string> = {
+  queued: '대기 중',
+  running: '진행 중',
+  completed: '완료',
+  failed: '실패',
+  interrupted: '중단됨',
+};
 
 export interface JobView {
   message: string;
@@ -25,7 +32,7 @@ let pollTimer: ReturnType<typeof setTimeout> | undefined;
 async function pollJob(id: string, baseVersion: number): Promise<void> {
   try {
     const { job, proposedPlan } = await apiRequest<JobStatus>('/api/jobs/' + id);
-    const message = 'Herdr · ' + job.status + ' · ' + job.message;
+    const message = STATUS_LABELS[job.status] ? `${STATUS_LABELS[job.status]} · ${job.message}` : job.message;
     if (job.status === 'completed') {
       jobStore.set({ message, proposal: normalizeImported(proposedPlan), baseVersion });
       notify('AI 설계 제안이 준비되었습니다. 검토 후 적용하세요.');
@@ -48,7 +55,7 @@ export async function startJob(rawInstruction: string, targetPath: string | null
   const text = rawInstruction.trim();
   const instruction = targetPath && text ? `[대상 노드: ${targetPath}] ${text}` : text;
   if (!instruction) {
-    notify('Herdr에게 전달할 설계 요청을 입력하세요.');
+    notify('계획할 내용을 입력하세요.');
     return false;
   }
   if (!confirm('Mac Studio의 Codex에 현재 계획을 전달해 변경안을 생성할까요?')) return false;
@@ -60,7 +67,7 @@ export async function startJob(rawInstruction: string, targetPath: string | null
       instruction,
       currentPlan: { schemaVersion: SCHEMA_VERSION, ...plan },
     });
-    jobStore.set({ message: 'Herdr 작업 시작: ' + response.id.slice(0, 8), proposal: null, baseVersion });
+    jobStore.set({ message: '계획 작업을 시작했습니다.', proposal: null, baseVersion });
     void pollJob(response.id, baseVersion);
     return true;
   } catch (err) {

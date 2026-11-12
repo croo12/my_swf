@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { LAYERS, planStore } from '@/entities/plan';
 import { repositoryStore, type RepoSlice } from '@/entities/repository';
-import { addSliceToPlan, planPathsOfSlice } from '@/features/add-slice-to-plan';
+import { addSliceToPlan, countSliceInPlan } from '@/features/add-slice-to-plan';
 import { analyzeRepository, analyzingStore } from '@/features/analyze-repository';
 import { useStore } from '@/shared/lib';
 
@@ -29,7 +29,6 @@ export function RepositoryOverview() {
   const selected = repository.slices.find((s) => s.key === selectedKey) ?? null;
   const imports = new Set(selected?.imports);
   const importedBy = new Set(selected?.importedBy);
-  const planPaths = new Set(plan.nodes.map((n) => n.path));
   const relationOf = (slice: RepoSlice) => {
     if (!selected) return '';
     if (slice.key === selected.key) return ' selected';
@@ -80,7 +79,7 @@ export function RepositoryOverview() {
       {selected && (
         <SliceDetail
           slice={selected}
-          inPlan={planPathsOfSlice(selected.key, planPaths).length}
+          inPlan={countSliceInPlan(selected.key, plan.nodes)}
           onSelect={setSelectedKey}
           onClose={() => setSelectedKey(null)}
         />
@@ -124,9 +123,9 @@ function SliceDetail({ slice, inPlan, onSelect, onClose }: SliceDetailProps) {
       <SliceLinks title="이 슬라이스를 쓰는 곳" kind="imported-by" keys={slice.importedBy} onSelect={onSelect} />
       <div className="repo-detail-actions">
         <button className="btn primary" disabled={inPlan >= total} onClick={() => addSliceToPlan(slice.key)}>
-          {inPlan >= total ? '계획에 있음' : '계획에 추가'}
+          {inPlan >= total ? '계획에 표시됨' : '계획에 기존 모듈로 표시'}
         </button>
-        <span className="help">계획 화면에서 세그먼트 단위로 편집합니다.</span>
+        <span className="help">새 모듈이 의존하는 기존 코드를 계획 화면에 참고용으로 놓습니다.</span>
       </div>
     </aside>
   );

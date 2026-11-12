@@ -1,5 +1,5 @@
 // How an FSD path (layer/slice/segment or layer/segment) maps onto a node.
-import { LAYERS, type Layer, type PlanNode } from './types';
+import { LAYERS, type Layer, type ModuleKind, type PlanNode } from './types';
 
 export const isLayer = (value: string): value is Layer => (LAYERS as readonly string[]).includes(value);
 /** app and shared hold segments directly; the other layers group segments into slices. */
@@ -22,4 +22,19 @@ export function isValidPath(path: string): boolean {
   const parts = path.split('/');
   if (!isLayer(parts[0])) return false;
   return isDirectLayer(parts[0]) ? parts.length === 2 : parts.length >= 3;
+}
+
+/** Plans made before modules had kinds are treated as new work. */
+export const kindOf = (n: PlanNode): ModuleKind => n.kind ?? 'new';
+export const moduleNameOf = (n: PlanNode) => n.name?.trim() || [sliceOf(n), segmentOf(n)].filter(Boolean).join(' / ');
+
+/** The same placement in another layer. Slices exist only in the sliced layers, so the shape may change. */
+export function pathInLayer(path: string, layer: Layer): string {
+  const parts = path.split('/').filter(Boolean);
+  const from = parts[0];
+  const segment = parts.at(-1) ?? 'model';
+  if (isDirectLayer(layer)) return `${layer}/${segment}`;
+  if (isDirectLayer(from))
+    return `${layer}/${segment}/${layer === 'features' || layer === 'entities' ? 'model' : 'ui'}`;
+  return [layer, ...parts.slice(1)].join('/');
 }

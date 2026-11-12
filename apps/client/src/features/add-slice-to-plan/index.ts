@@ -1,1 +1,1 @@
-export { addSliceToPlan, planPathsOfSlice } from './model/add';
+export { addSliceToPlan, countSliceInPlan } from './model/add';

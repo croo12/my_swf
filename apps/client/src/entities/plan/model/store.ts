@@ -3,12 +3,15 @@ import { createStore } from '@/shared/lib';
 import { notify } from '@/shared/ui/toast';
 import { layoutAll, nodeY } from './layout';
 import { layerOf } from './path';
-import { SAMPLE } from './sample';
 import { clearSelection, selectionStore } from './selection';
 import type { Plan } from './types';
 
-const STORAGE_KEY = 'planning-workbench-mvp-v3';
+// v4: plans start empty and hold planned modules; older stored graphs are left alone under the old key.
+const STORAGE_KEY = 'planning-workbench-plan-v4';
 const MAX_HISTORY = 40;
+
+/** Nothing exists before planning: a plan starts with no modules. */
+export const emptyPlan = (): Plan => ({ version: 1, nodes: [], edges: [], requests: [] });
 
 export interface PlanState {
   plan: Plan;
@@ -20,9 +23,9 @@ function loadPlan(): Plan {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
     if (saved && Array.isArray(saved.nodes) && Array.isArray(saved.edges)) return snapToLanes(saved as Plan);
   } catch {
-    // Unreadable storage falls back to the sample graph.
+    // Unreadable storage falls back to an empty plan.
   }
-  return snapToLanes(structuredClone(SAMPLE));
+  return emptyPlan();
 }
 
 /** Stored plans may carry heights from an older lane layout; the layer decides the height. */

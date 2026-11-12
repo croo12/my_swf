@@ -1,6 +1,6 @@
 // Canvas geometry: where lanes, slices, and nodes sit.
 import { layerIndex, layerOf, segmentOf, sliceOf } from './path';
-import { LAYERS, type Plan, type PlanNode } from './types';
+import { LAYERS, type Layer, type Plan, type PlanNode } from './types';
 
 export const NODE_W = 265;
 export const NODE_H = 201;
@@ -36,4 +36,10 @@ export function layoutAll(plan: Plan): Plan {
     }
   }
   return { ...plan, nodes: plan.nodes.map((n) => ({ ...n, ...positions.get(n.id) })) };
+}
+
+/** The layer whose lane contains the given vertical position (clamped to the first and last lane). */
+export function layerAtY(y: number): Layer {
+  const index = Math.floor((y - LANE_TOP) / LANE_STEP);
+  return LAYERS[Math.max(0, Math.min(LAYERS.length - 1, index))];
 }

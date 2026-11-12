@@ -2,8 +2,11 @@
 import {
   CONTENT_LEFT,
   EDGE_TYPES,
-  SAMPLE,
   clearSelection,
+  emptyPlan,
+  pathInLayer,
+  type Layer,
+  type ModuleKind,
   closeEditor,
   commitPlan,
   nodeY,
@@ -22,8 +25,12 @@ import { createStore } from '@/shared/lib';
 import { notify } from '@/shared/ui/toast';
 
 export interface NodeDraft {
+  name: string;
+  kind: ModuleKind;
   path: string;
   description: string;
+  behaviors: string[];
+  files: string[];
   inputs: string[];
   outputs: string[];
 }
@@ -73,19 +80,34 @@ export function moveNode(id: string, x: number, y: number): void {
   commitPlan((p) => ({ ...p, nodes: p.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)) }));
 }
 
+/** Adds a blank module to place and describe by hand. */
 export function addNode(): void {
   const id = 'module-' + Date.now();
   const node = {
     id,
+    name: '새 모듈',
+    kind: 'new' as const,
     path: 'features/new-feature/model',
-    description: '새 모듈의 책임을 적어주세요.',
+    description: '',
     inputs: [],
     outputs: [],
     x: CONTENT_LEFT + 20,
     y: nodeY('features'),
   };
-  mutatePlan('새 모듈이 추가되었습니다.', (p) => layoutAll({ ...p, nodes: [...p.nodes, node] }));
+  mutatePlan('새 모듈을 추가했습니다. 이름과 배치 위치를 정하세요.', (p) =>
+    layoutAll({ ...p, nodes: [...p.nodes, node] }),
+  );
   openEditor(id);
+}
+
+/** Moves a module to another layer; its slice and segment are kept where the target layer has them. */
+export function relocateNode(id: string, layer: Layer): void {
+  const node = planStore.get().plan.nodes.find((n) => n.id === id);
+  if (!node || layerOf(node) === layer) return;
+  const path = pathInLayer(node.path, layer);
+  mutatePlan(`배치를 ${path}(으)로 옮겼습니다.`, (p) =>
+    layoutAll({ ...p, nodes: p.nodes.map((n) => (n.id === id ? { ...n, path } : n)) }),
+  );
 }
 
 export function saveNode(id: string, draft: NodeDraft): void {
@@ -125,8 +147,9 @@ export function undo(): void {
   if (undoPlan()) notify('이전 상태로 되돌렸습니다.');
 }
 
-export function resetToSample(): void {
-  if (!confirm('현재 설계를 지우고 샘플 상태로 초기화할까요?')) return;
-  mutatePlan('샘플 그래프로 초기화했습니다.', () => structuredClone(SAMPLE));
+/** Empties the plan. The previous plan can be brought back with undo. */
+export function clearPlan(): void {
+  if (planStore.get().plan.nodes.length > 0 && !confirm('계획의 모듈을 모두 지울까요?')) return;
+  mutatePlan('계획을 비웠습니다.', (p) => ({ ...emptyPlan(), version: p.version }));
   clearSelection();
 }
