@@ -1,110 +1,387 @@
 //! FSD-aware, conservative repository scanner.
-//! Filesystem layout and resolvable import edges are observed; I/O contracts are NOT guessed.
-use std::{collections::{HashMap, HashSet}, fs, path::{Path, PathBuf}};
+//!
+//! Observes the filesystem layout and the import edges it can resolve; I/O contracts are NOT guessed.
+//!
+//! - The FSD source root is found inside the repository (monorepos keep it in e.g. `services/client/src`).
+//! - Below a sliced layer, folders are grouping folders until one has an index file (the slice's
+//!   public API). That folder is the slice; its sub-folders are the segments.
+//! - An import of a slice's public API is traced through the index re-exports to the segment that
+//!   declares the imported name.
 use regex::Regex;
 use serde_json::{json, Value};
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    env, fs,
+    path::{Component, Path, PathBuf},
+};
 use walkdir::WalkDir;
 
 const LAYERS: &[&str] = &["app", "pages", "widgets", "features", "entities", "shared"];
+const SOURCE_EXTS: &[&str] = &["ts", "tsx", "js", "jsx", "mts", "mjs"];
+/// Folder names that mark their parent as a slice even when it has no index file.
+const STANDARD_SEGMENTS: &[&str] = &["ui", "model", "api", "lib", "config"];
+const IGNORED_DIRS: &[&str] = &[
+    "node_modules", "dist", "build", "coverage", "target", "storybook-static",
+    "__tests__", "__snapshots__", "__mocks__", "__fixtures__",
+];
+/// Segment name used for a slice that keeps its files directly in the slice folder.
+const ROOT_SEGMENT: &str = "index";
+const MAX_ROOT_DEPTH: usize = 6;
+const MAX_GROUP_DEPTH: usize = 6;
+const MAX_REEXPORT_DEPTH: usize = 10;
 
-fn fsd_path(relative: &Path) -> Option<String> {
-    let parts: Vec<String> = relative.components().map(|p| p.as_os_str().to_string_lossy().to_string()).collect();
-    let layer = parts.first()?.as_str();
-    if !LAYERS.contains(&layer) { return None; }
-    if layer == "app" || layer == "shared" {
-        if parts.len() < 2 { return None; }
-        Some(format!("{}/{}", layer, parts[1]))
-    } else {
-        if parts.len() < 3 { return None; }
-        Some(format!("{}/{}/{}", layer, parts[1], parts[2]))
-    }
+fn is_ignored_dir(name: &str) -> bool { name.starts_with('.') || IGNORED_DIRS.contains(&name) }
+fn is_direct_layer(layer: &str) -> bool { layer == "app" || layer == "shared" }
+fn is_source_file(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| SOURCE_EXTS.contains(&e))
 }
-
-fn source_root(repo: &Path) -> PathBuf {
-    if repo.join("src").is_dir() { repo.join("src") } else { repo.to_path_buf() }
+/// Tests and stories import widely for their own purposes; they are not part of the architecture.
+fn is_test_file(path: &Path) -> bool {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    [".test.", ".spec.", ".stories."].iter().any(|marker| name.contains(marker))
 }
-
-fn normalize_import_path(from_file: &Path, spec: &str, root: &Path) -> Option<PathBuf> {
-    let logical = if let Some(x) = spec.strip_prefix("@/") {
-        root.join(x)
-    } else if spec.starts_with('.') {
-        from_file.parent()?.join(spec)
-    } else {
-        // Try aliases like "entities/book/model"; skip npm packages otherwise.
-        if LAYERS.iter().any(|layer| spec.starts_with(&format!("{layer}/"))) { root.join(spec) }
-        else { return None; }
-    };
-    // Lexical normalization only. Do not escape the selected repository's source root.
-    let mut path = PathBuf::new();
-    for c in logical.components() {
+fn child_dirs(dir: &Path) -> Vec<(String, PathBuf)> {
+    let mut dirs: Vec<(String, PathBuf)> = fs::read_dir(dir).into_iter().flatten().flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| (e.file_name().to_string_lossy().to_string(), e.path()))
+        .filter(|(name, _)| !is_ignored_dir(name))
+        .collect();
+    dirs.sort();
+    dirs
+}
+fn index_file(dir: &Path) -> Option<PathBuf> {
+    SOURCE_EXTS.iter().map(|ext| dir.join(format!("index.{ext}"))).find(|p| p.is_file())
+}
+fn has_direct_source(dir: &Path) -> bool {
+    fs::read_dir(dir).into_iter().flatten().flatten().any(|e| e.path().is_file() && is_source_file(&e.path()))
+}
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in path.components() {
         match c {
-            std::path::Component::ParentDir => { path.pop(); }
-            std::path::Component::CurDir => {}
-            other => path.push(other.as_os_str()),
+            Component::ParentDir => { out.pop(); }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
         }
     }
-    path.starts_with(root).then_some(path)
+    out
+}
+/// Resolves an extension-less module path to a file: `x.ts`, `x.tsx`, ..., or `x/index.ts`.
+fn resolve_module(path: &Path) -> Option<PathBuf> {
+    if path.is_file() { return Some(path.to_path_buf()); }
+    for ext in SOURCE_EXTS {
+        let mut with_ext = path.as_os_str().to_owned();
+        with_ext.push(format!(".{ext}"));
+        let candidate = PathBuf::from(with_ext);
+        if candidate.is_file() { return Some(candidate); }
+    }
+    if path.is_dir() { index_file(path) } else { None }
+}
+
+/// Finds the directory that holds the FSD layer folders. `FACTORY_SOURCE_ROOT` (relative to the
+/// repository, or absolute) overrides the search.
+fn find_source_root(repo: &Path) -> Result<PathBuf, String> {
+    if let Ok(configured) = env::var("FACTORY_SOURCE_ROOT") {
+        let root = repo.join(configured);
+        return if root.is_dir() { Ok(root) } else { Err(format!("FACTORY_SOURCE_ROOT is not a directory: {}", root.display())) };
+    }
+    let layer_count = |dir: &Path| LAYERS.iter().filter(|layer| dir.join(layer).is_dir()).count();
+    let mut best: Option<(usize, usize, PathBuf)> = None; // (layers found, depth, path)
+    let walker = WalkDir::new(repo).follow_links(false).max_depth(MAX_ROOT_DEPTH).into_iter()
+        .filter_entry(|e| e.depth() == 0 || !is_ignored_dir(&e.file_name().to_string_lossy()));
+    for entry in walker.filter_map(Result::ok).filter(|e| e.file_type().is_dir()) {
+        let score = layer_count(entry.path());
+        // More layers wins; among equals the shallowest directory wins.
+        if score >= 2 && best.as_ref().is_none_or(|(s, d, _)| score > *s || (score == *s && entry.depth() < *d)) {
+            best = Some((score, entry.depth(), entry.path().to_path_buf()));
+        }
+    }
+    best.map(|(_, _, path)| path).ok_or_else(|| format!(
+        "No directory with FSD layer folders (app/pages/widgets/features/entities/shared) was found within {} levels of {}. Set FACTORY_SOURCE_ROOT to point at it.",
+        MAX_ROOT_DEPTH, repo.display()
+    ))
+}
+
+struct Slice {
+    layer: &'static str,
+    /// Path parts between the layer and the segments, e.g. ["home", "assignment"].
+    rel: Vec<String>,
+    dir: PathBuf,
+    segments: Vec<String>,
+}
+
+enum Location {
+    /// A segment node, identified by its plan path.
+    Node(String),
+    /// The slice's public API (its index file); which segment is meant depends on the imported names.
+    SliceRoot(usize),
+    Outside,
+}
+
+enum Names { All, List(Vec<String>) }
+
+struct Scan {
+    root: PathBuf,
+    slices: Vec<Slice>,
+    slice_index: HashMap<(String, String), usize>,
+    direct_segments: HashMap<&'static str, Vec<String>>,
+}
+
+impl Scan {
+    fn discover(root: &Path) -> Scan {
+        let mut scan = Scan { root: root.to_path_buf(), slices: vec![], slice_index: HashMap::new(), direct_segments: HashMap::new() };
+        for &layer in LAYERS {
+            let layer_dir = root.join(layer);
+            if !layer_dir.is_dir() { continue; }
+            if is_direct_layer(layer) {
+                scan.direct_segments.insert(layer, child_dirs(&layer_dir).into_iter().map(|(name, _)| name).collect());
+            } else {
+                for (name, dir) in child_dirs(&layer_dir) { scan.collect_slices(layer, vec![name], &dir); }
+            }
+        }
+        for (i, slice) in scan.slices.iter().enumerate() {
+            scan.slice_index.insert((slice.layer.to_owned(), slice.rel.join("/")), i);
+        }
+        scan
+    }
+
+    /// Walks down from a layer: a folder with an index file (or with files/standard segments of its
+    /// own) is a slice; anything above it is a grouping folder.
+    fn collect_slices(&mut self, layer: &'static str, rel: Vec<String>, dir: &Path) {
+        let children = child_dirs(dir);
+        let is_slice = index_file(dir).is_some()
+            || has_direct_source(dir)
+            || children.iter().any(|(name, _)| STANDARD_SEGMENTS.contains(&name.as_str()));
+        if is_slice {
+            let mut segments: Vec<String> = children.into_iter().map(|(name, _)| name).collect();
+            if segments.is_empty() { segments.push(ROOT_SEGMENT.to_owned()); }
+            self.slices.push(Slice { layer, rel, dir: dir.to_path_buf(), segments });
+        } else if rel.len() < MAX_GROUP_DEPTH {
+            for (name, child) in children {
+                let mut child_rel = rel.clone();
+                child_rel.push(name);
+                self.collect_slices(layer, child_rel, &child);
+            }
+        }
+    }
+
+    fn node_paths(&self) -> Vec<String> {
+        let mut paths = vec![];
+        for &layer in LAYERS {
+            if let Some(segments) = self.direct_segments.get(layer) {
+                paths.extend(segments.iter().map(|segment| format!("{layer}/{segment}")));
+            }
+            for slice in self.slices.iter().filter(|s| s.layer == layer) {
+                paths.extend(slice.segments.iter().map(|segment| format!("{layer}/{}/{segment}", slice.rel.join("/"))));
+            }
+        }
+        paths
+    }
+
+    /// Maps a file or module path under the source root to the node (or slice) it belongs to.
+    fn locate(&self, path: &Path) -> Location {
+        let Ok(relative) = path.strip_prefix(&self.root) else { return Location::Outside; };
+        let mut parts: Vec<String> = relative.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
+        if let Some(last) = parts.last_mut() {
+            if is_source_file(Path::new(last.as_str())) {
+                *last = Path::new(last.as_str()).file_stem().unwrap_or_default().to_string_lossy().to_string();
+            }
+        }
+        let Some(layer) = parts.first().map(String::as_str) else { return Location::Outside; };
+        if let Some(segments) = self.direct_segments.get(layer) {
+            return match parts.get(1) {
+                Some(segment) if segments.contains(segment) => Location::Node(format!("{layer}/{segment}")),
+                _ => Location::Outside,
+            };
+        }
+        for end in 2..=parts.len() {
+            let Some(&index) = self.slice_index.get(&(layer.to_owned(), parts[1..end].join("/"))) else { continue; };
+            let slice = &self.slices[index];
+            let node = |segment: &str| Location::Node(format!("{layer}/{}/{segment}", slice.rel.join("/")));
+            return match parts.get(end).map(String::as_str) {
+                None | Some("index") if slice.segments == [ROOT_SEGMENT] => node(ROOT_SEGMENT),
+                None | Some("index") => Location::SliceRoot(index),
+                Some(first) if slice.segments.iter().any(|s| s == first) => node(first),
+                Some(_) if slice.segments == [ROOT_SEGMENT] => node(ROOT_SEGMENT),
+                Some(_) => Location::Outside,
+            };
+        }
+        Location::Outside
+    }
+
+    /// Turns an import specifier into a path under the source root, or None for npm packages.
+    fn resolve_spec(&self, from_file: &Path, spec: &str) -> Option<PathBuf> {
+        let logical = if spec.starts_with('.') {
+            from_file.parent()?.join(spec)
+        } else if let Some(rest) = ["@/", "~/", "src/"].iter().find_map(|prefix| spec.strip_prefix(prefix)) {
+            self.root.join(rest)
+        } else {
+            // Layer aliases: "@features/x", "features/x".
+            let bare = spec.strip_prefix('@').unwrap_or(spec);
+            if !LAYERS.contains(&bare.split('/').next()?) { return None; }
+            self.root.join(bare)
+        };
+        let path = normalize(&logical);
+        path.starts_with(&self.root).then_some(path)
+    }
+}
+
+struct Patterns {
+    import_from: Regex,
+    bare_import: Regex,
+    export_star: Regex,
+    export_list: Regex,
+    export_decl: Regex,
+}
+
+impl Patterns {
+    fn new() -> Result<Patterns, String> {
+        let re = |pattern: &str| Regex::new(pattern).map_err(|e| e.to_string());
+        Ok(Patterns {
+            import_from: re(r#"\bimport\s+(?:type\s+)?([^'";]*?)\s*from\s*["']([^"']+)["']"#)?,
+            bare_import: re(r#"\bimport\s*\(\s*["']([^"']+)["']\s*\)|\brequire\s*\(\s*["']([^"']+)["']\s*\)|\bimport\s+["']([^"']+)["']"#)?,
+            export_star: re(r#"\bexport\s+\*\s*(?:as\s+([\w$]+)\s+)?from\s*["']([^"']+)["']"#)?,
+            export_list: re(r#"\bexport\s+(?:type\s+)?\{([^}]*)\}(?:\s*from\s*["']([^"']+)["'])?"#)?,
+            export_decl: re(r"\bexport\s+(?:declare\s+)?(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(?:const|let|var|function\*?|class|interface|type|enum)\s+([\w$]+)")?,
+        })
+    }
+}
+
+/// Splits `{ a, type b, c as d }` into (original name, exported name) pairs.
+fn brace_names(list: &str) -> Vec<(String, String)> {
+    list.split(',').filter_map(|item| {
+        let item = item.trim().trim_start_matches("type ").trim();
+        if item.is_empty() { return None; }
+        let mut names = item.split(" as ").map(str::trim);
+        let original = names.next()?.to_owned();
+        let exported = names.next().map(str::to_owned).unwrap_or_else(|| original.clone());
+        Some((original, exported))
+    }).collect()
+}
+
+/// The names an `import <clause> from` statement asks for.
+fn imported_names(clause: &str) -> Names {
+    let clause = clause.trim();
+    if clause.contains('*') { return Names::All; }
+    let (default_part, braces) = match clause.split_once('{') {
+        Some((before, rest)) => (before, rest.trim_end_matches('}')),
+        None => (clause, ""),
+    };
+    let mut names: Vec<String> = brace_names(braces).into_iter().map(|(original, _)| original).collect();
+    if !default_part.trim().trim_end_matches(',').trim().is_empty() { names.push("default".to_owned()); }
+    Names::List(names)
+}
+
+/// Collects (exported name, file or folder that provides it) for a module, following re-exports.
+fn collect_exports(file: &Path, patterns: &Patterns, out: &mut Vec<(String, PathBuf)>, visited: &mut HashSet<PathBuf>, depth: usize) {
+    if depth > MAX_REEXPORT_DEPTH || !visited.insert(file.to_path_buf()) { return; }
+    let Ok(text) = fs::read_to_string(file) else { return; };
+    let target_of = |spec: &str| spec.starts_with('.').then(|| normalize(&file.parent().unwrap_or(file).join(spec)));
+    for cap in patterns.export_star.captures_iter(&text) {
+        match (cap.get(1), target_of(&cap[2])) {
+            (Some(namespace), _) => out.push((namespace.as_str().to_owned(), file.to_path_buf())),
+            (None, Some(target)) => {
+                if let Some(module) = resolve_module(&target) { collect_exports(&module, patterns, out, visited, depth + 1); }
+            }
+            (None, None) => {}
+        }
+    }
+    for cap in patterns.export_list.captures_iter(&text) {
+        // `export { a } from './x'` is provided by x; `export { a }` by this file.
+        let provider = cap.get(2).and_then(|spec| target_of(spec.as_str())).unwrap_or_else(|| file.to_path_buf());
+        out.extend(brace_names(&cap[1]).into_iter().map(|(_, exported)| (exported, provider.clone())));
+    }
+    out.extend(patterns.export_decl.captures_iter(&text).map(|cap| (cap[1].to_owned(), file.to_path_buf())));
+    if text.contains("export default") { out.push(("default".to_owned(), file.to_path_buf())); }
+}
+
+/// For one slice: which segment provides each name of its public API.
+fn public_api(slice: &Slice, patterns: &Patterns) -> HashMap<String, BTreeSet<String>> {
+    let mut table: HashMap<String, BTreeSet<String>> = HashMap::new();
+    let Some(index) = index_file(&slice.dir) else { return table; };
+    let mut exports = vec![];
+    collect_exports(&index, patterns, &mut exports, &mut HashSet::new(), 0);
+    for (name, provider) in exports {
+        let segment = provider.strip_prefix(&slice.dir).ok()
+            .and_then(|rel| rel.components().next())
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .filter(|first| slice.segments.contains(first));
+        if let Some(segment) = segment { table.entry(name).or_default().insert(segment); }
+    }
+    table
 }
 
 pub fn scan(repo: &Path) -> Result<Value, String> {
-    let root = source_root(repo);
-    let mut paths = Vec::<String>::new();
-    let mut seen = HashSet::new();
-    for layer in LAYERS {
-        let base = root.join(layer);
-        if !base.is_dir() { continue; }
-        let Ok(dirs) = fs::read_dir(&base) else { continue; };
-        for a in dirs.flatten() {
-            if !a.path().is_dir() { continue; }
-            if *layer == "app" || *layer == "shared" {
-                let candidate = format!("{layer}/{}", a.file_name().to_string_lossy());
-                if seen.insert(candidate.clone()) { paths.push(candidate); }
-            } else if let Ok(subdirs) = fs::read_dir(a.path()) {
-                for b in subdirs.flatten() {
-                    if !b.path().is_dir() { continue; }
-                    let candidate = format!("{layer}/{}/{}", a.file_name().to_string_lossy(), b.file_name().to_string_lossy());
-                    if seen.insert(candidate.clone()) { paths.push(candidate); }
+    let root = find_source_root(repo)?;
+    let scan = Scan::discover(&root);
+    let paths = scan.node_paths();
+    if paths.is_empty() { return Err(format!("FSD layer/slice/segment directory was not found beneath {}", root.display())); }
+
+    let node_id = |path: &str| format!("observed-{}", path.replace('/', "--"));
+    let mut per_layer: HashMap<&str, usize> = HashMap::new();
+    let nodes: Vec<Value> = paths.iter().map(|path| {
+        let layer = path.split('/').next().unwrap_or("");
+        let column = per_layer.entry(layer).or_insert(0);
+        let row = LAYERS.iter().position(|l| *l == layer).unwrap_or(0);
+        let node = json!({"id":node_id(path),"path":path,"description":"실제 디렉터리에서 발견됨 · I/O 미분석","inputs":[],"outputs":[],"source":"filesystem","x":210 + *column * 300,"y":150 + row * 290});
+        *column += 1;
+        node
+    }).collect();
+
+    let patterns = Patterns::new()?;
+    let mut api_cache: HashMap<usize, HashMap<String, BTreeSet<String>>> = HashMap::new();
+    let mut edge_keys: HashSet<(String, String)> = HashSet::new();
+    let mut edges = vec![];
+    let mut unresolved = 0usize;
+    let walker = WalkDir::new(&root).follow_links(false).max_depth(24).into_iter()
+        .filter_entry(|e| e.depth() == 0 || !(e.file_type().is_dir() && is_ignored_dir(&e.file_name().to_string_lossy())));
+    for entry in walker.filter_map(Result::ok) {
+        let file = entry.path();
+        if !entry.file_type().is_file() || !is_source_file(file) || is_test_file(file) { continue; }
+        let Location::Node(source) = scan.locate(file) else { continue; };
+        let Ok(text) = fs::read_to_string(file) else { continue; };
+
+        let mut imports: Vec<(String, Names)> = vec![];
+        imports.extend(patterns.import_from.captures_iter(&text).map(|cap| (cap[2].to_owned(), imported_names(&cap[1]))));
+        imports.extend(patterns.export_star.captures_iter(&text).map(|cap| (cap[2].to_owned(), Names::All)));
+        imports.extend(patterns.export_list.captures_iter(&text).filter_map(|cap| {
+            let spec = cap.get(2)?.as_str().to_owned();
+            Some((spec, Names::List(brace_names(&cap[1]).into_iter().map(|(original, _)| original).collect())))
+        }));
+        imports.extend(patterns.bare_import.captures_iter(&text).filter_map(|cap| {
+            let spec = cap.get(1).or(cap.get(2)).or(cap.get(3))?;
+            Some((spec.as_str().to_owned(), Names::All))
+        }));
+
+        for (spec, names) in imports {
+            let Some(target_path) = scan.resolve_spec(file, &spec) else { continue; };
+            let targets: Vec<String> = match scan.locate(&target_path) {
+                Location::Node(path) => vec![path],
+                Location::SliceRoot(index) => {
+                    let slice = &scan.slices[index];
+                    let api = api_cache.entry(index).or_insert_with(|| public_api(slice, &patterns));
+                    let segments: BTreeSet<&String> = match &names {
+                        Names::All => api.values().flatten().collect(),
+                        Names::List(list) => list.iter().filter_map(|name| {
+                            let found = api.get(name);
+                            if found.is_none() { unresolved += 1; }
+                            found
+                        }).flatten().collect(),
+                    };
+                    segments.into_iter().map(|segment| format!("{}/{}/{segment}", slice.layer, slice.rel.join("/"))).collect()
+                }
+                Location::Outside => vec![],
+            };
+            for target in targets {
+                if target != source && edge_keys.insert((source.clone(), target.clone())) {
+                    edges.push(json!({"id":format!("observed-edge-{}",edge_keys.len()),"from":node_id(&source),"to":node_id(&target),"type":"imports","source":"import-scan"}));
                 }
             }
         }
     }
-    if paths.is_empty() { return Err(format!("FSD layer/slice/segment directory was not found beneath {}", root.display())); }
-    paths.sort_by_key(|s| (LAYERS.iter().position(|l| *l == s.split('/').next().unwrap_or("")).unwrap_or(99), s.clone()));
-    let mut per_layer: HashMap<String, usize> = HashMap::new();
-    let mut nodes = vec![];
-    let mut ids = HashMap::new();
-    for path in &paths {
-        let layer = path.split('/').next().unwrap_or("");
-        let index = per_layer.entry(layer.to_owned()).or_insert(0);
-        let row = LAYERS.iter().position(|l| *l == layer).unwrap_or(0);
-        let id = format!("observed-{}", path.replace('/', "--"));
-        ids.insert(path.clone(), id.clone());
-        nodes.push(json!({"id":id,"path":path,"description":"실제 디렉터리에서 발견됨 · I/O 미분석","inputs":[],"outputs":[],"source":"filesystem","x":210 + *index * 300,"y":150 + row * 290}));
-        *index += 1;
-    }
-    let re = Regex::new(r#"(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)[\"']([^\"']+)[\"']"#).map_err(|e| e.to_string())?;
-    let mut edges = vec![];
-    let mut edge_ids = HashSet::new();
-    for entry in WalkDir::new(&root).follow_links(false).max_depth(16).into_iter().filter_map(Result::ok) {
-        if !entry.file_type().is_file() { continue; }
-        let path = entry.path();
-        let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue; };
-        if !["ts", "tsx", "js", "jsx", "mts", "mjs"].contains(&ext) { continue; }
-        if path.components().any(|p| ["node_modules", "dist", ".git", "coverage"].iter().any(|part| p.as_os_str() == *part)) { continue; }
-        let Ok(relative) = path.strip_prefix(&root) else { continue; };
-        let Some(source_module) = fsd_path(relative) else { continue; };
-        if !ids.contains_key(&source_module) { continue; }
-        let Ok(text) = fs::read_to_string(path) else { continue; };
-        for cap in re.captures_iter(&text) {
-            let Some(target_path) = normalize_import_path(path, &cap[1], &root) else { continue; };
-            let Ok(target_rel) = target_path.strip_prefix(&root) else { continue; };
-            let Some(target_module) = fsd_path(target_rel) else { continue; };
-            if target_module == source_module { continue; }
-            let (Some(from), Some(to)) = (ids.get(&source_module), ids.get(&target_module)) else { continue; };
-            if edge_ids.insert((from.clone(), to.clone())) {
-                edges.push(json!({"id":format!("observed-edge-{}",edge_ids.len()),"from":from,"to":to,"type":"imports","source":"import-scan"}));
-            }
-        }
-    }
-    Ok(json!({"schemaVersion":"0.3","version":1,"nodes":nodes,"edges":edges,"requests":[],"repository":repo.display().to_string(),"analysis":{"kind":"static","note":"Directories and some import paths are verified. No AI-derived I/O contracts; tsconfig aliases/re-exports may need additional analysis."}}))
+
+    let source_root = root.strip_prefix(repo).unwrap_or(&root).to_string_lossy().replace('\\', "/");
+    Ok(json!({"schemaVersion":"0.3","version":1,"nodes":nodes,"edges":edges,"requests":[],"repository":repo.display().to_string(),
+        "analysis":{"kind":"static","sourceRoot":source_root,"slices":scan.slices.len(),"unresolvedImports":unresolved,
+            "note":"Directories and resolvable imports are verified. A slice is the first folder below a layer that has an index file; imports of a slice's public API are traced through its re-exports. No AI-derived I/O contracts."}}))
 }

@@ -9,8 +9,11 @@ export const layerIndex = (layer: string) => (LAYERS as readonly string[]).index
 export const layerOf = (n: PlanNode) => n.path.split('/')[0];
 export const partsOf = (n: PlanNode) => n.path.split('/').filter(Boolean);
 export const titleOf = (n: PlanNode) => n.path.split('/').slice(1).join('/') || n.path;
-export const segmentOf = (n: PlanNode) => (isDirectLayer(layerOf(n)) ? partsOf(n)[1] : partsOf(n)[2]) || 'segment';
-export const sliceOf = (n: PlanNode) => (isDirectLayer(layerOf(n)) ? null : partsOf(n)[1] || 'slice');
+/** The segment is the last part; in sliced layers everything between the layer and it names the slice. */
+export const segmentOf = (n: PlanNode) => (partsOf(n).length > 1 ? partsOf(n).at(-1) : undefined) ?? 'segment';
+/** Slices may sit below grouping folders, so the slice name can have several parts ("home/assignment"). */
+export const sliceOf = (n: PlanNode) =>
+  isDirectLayer(layerOf(n)) ? null : partsOf(n).slice(1, -1).join('/') || partsOf(n)[1] || 'slice';
 
 export const cleanPath = (raw: string) => raw.trim().replace(/^\/+|\/+$/g, '');
 

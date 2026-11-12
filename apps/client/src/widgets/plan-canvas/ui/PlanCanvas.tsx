@@ -56,7 +56,7 @@ export function PlanCanvas({ scrollRef }: { scrollRef: RefObject<HTMLDivElement 
     // Nodes move horizontally only; they stay inside their layer lane.
     setDragPos({
       id: drag.id,
-      x: Math.max(CONTENT_LEFT + 10, Math.min(3000, drag.x + dx)),
+      x: Math.max(CONTENT_LEFT + 10, drag.x + dx),
       y: nodeY(layerOf(node)),
     });
   };

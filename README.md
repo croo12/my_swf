@@ -154,7 +154,8 @@ To build from source on Mac Studio instead, use `./scripts/macos/install-server-
 
 - No verified production build / code signing in this delivery environment.
 - One selected repository per server instance; not a general project registry yet.
-- The static scanner is intentionally conservative: import aliases beyond `@/`, package exports, barrel re-exports, and TypeScript type resolution need a more complete analyzer.
+- The static scanner works on text patterns, not a TypeScript AST. It finds the FSD source root inside the repository (set `FACTORY_SOURCE_ROOT`, relative to the repository, to choose it yourself), treats the first folder below a layer that has an index file as the slice, and resolves relative imports, `@/`, and layer aliases such as `@features/...`. Imports of a slice's public API are traced through its index re-exports to a segment; names it cannot trace are counted in `analysis.unresolvedImports` and produce no edge. Other `tsconfig` aliases, package exports, and type resolution are not handled.
+- Large repositories produce large graphs (hundreds of nodes, thousands of relations). The canvas renders them, but it has no filtering or zoom yet.
 - Planning's AI contract is JSON + schema validation, not a guarantee of architectural quality. Current AI revisions replace the entire graph *only after human approval*, not yet a minimal patch/diff merge.
 - Herdr job status is persisted, but ongoing processes are **not automatically resumed after a Factory server restart**; interrupted jobs should be inspected in Herdr.
 - No rich multiuser edit conflict management, automatic worktree cleanup, push/PR integration, or delivery stage yet.
