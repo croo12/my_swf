@@ -1,1 +1,1 @@
-export { analyzeRepository, approveOnServer, loadFromServer, saveToServer } from './model/sync';
+export { approveOnServer, loadFromServer, saveToServer } from './model/sync';

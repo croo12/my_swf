@@ -2,13 +2,20 @@ import { useRef } from 'react';
 import { laneY, type Layer } from '@/entities/plan';
 import { ConnectionModal } from '@/features/connect-server';
 import { NodeEditor } from '@/features/edit-graph';
+import { viewStore } from '@/features/switch-view';
+import { useStore } from '@/shared/lib';
 import { Toast } from '@/shared/ui/toast';
 import { CommandBar } from '@/widgets/command-bar';
 import { PlanCanvas } from '@/widgets/plan-canvas';
+import { RepositoryOverview } from '@/widgets/repository-overview';
 import { WorkbenchHeader } from '@/widgets/workbench-header';
 
-/** The single screen of the app: header, graph canvas with its editor overlay, and the command bar. */
+/**
+ * The single screen of the app. It has two views: the read-only repository overview, and the
+ * plan, where the graph is edited and design requests are written.
+ */
 export function WorkbenchPage() {
+  const view = useStore(viewStore);
   const scrollRef = useRef<HTMLDivElement>(null);
   const jumpToLayer = (layer: Layer) => scrollRef.current?.scrollTo({ top: laneY(layer) - 18, behavior: 'smooth' });
 
@@ -17,11 +24,17 @@ export function WorkbenchPage() {
       <div className="app">
         <WorkbenchHeader onJumpToLayer={jumpToLayer} />
         <main className="stage">
-          <PlanCanvas scrollRef={scrollRef} />
-          <NodeEditor />
+          {view === 'plan' ? (
+            <>
+              <PlanCanvas scrollRef={scrollRef} />
+              <NodeEditor />
+            </>
+          ) : (
+            <RepositoryOverview />
+          )}
           <Toast />
         </main>
-        <CommandBar />
+        {view === 'plan' && <CommandBar />}
       </div>
       <ConnectionModal />
     </>

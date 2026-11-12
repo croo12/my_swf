@@ -12,9 +12,9 @@ software-factory-multiplatform/
 │   ├── src/                     # Feature-Sliced Design layers; imports only point downward
 │   │   ├── app/                 # Entry point and global styles
 │   │   ├── pages/workbench/     # The single screen, composed from widgets
-│   │   ├── widgets/             # workbench-header, plan-canvas, command-bar
-│   │   ├── features/            # edit-graph, record-request, connect-server, server-sync, plan-transfer, plan-job
-│   │   ├── entities/plan/       # Plan schema v0.3, layout and validation, plan/selection stores, node and edge UI
+│   │   ├── widgets/             # workbench-header, repository-overview, plan-canvas, command-bar
+│   │   ├── features/            # edit-graph, record-request, analyze-repository, add-slice-to-plan, switch-view, connect-server, server-sync, plan-transfer, plan-job
+│   │   ├── entities/            # plan (schema v0.3, layout, validation, stores, node/edge UI), repository (slice-level scan)
 │   │   └── shared/              # api (Factory transport), lib (store), ui (toast)
 │   ├── package.json             # Tauri / Vite commands, plus `npm run check` (tsc, oxlint, steiger, oxfmt)
 │   └── src-tauri/               # Native Rust client for macOS/Windows/Android
@@ -87,8 +87,8 @@ The server binds only to loopback by default, requires a bearer token for every 
 
 ## C. Using Planning
 
-1. `⌕ 저장소 분석` — read actual `src/app/pages/widgets/features/entities/shared` directory layout and resolvable imports. Existing canvas replaced **only with explicit confirmation**. Static analysis does not invent I/O contracts.
-2. Edit the graph, input/output contracts, and dependencies directly on the canvas.
+1. `서버 ▾ → 저장소 분석` — the server reads the real FSD layout and resolvable imports, and the **저장소** view shows them as a read-only overview at slice level. Select a slice to see what it uses and what uses it, and press `계획에 추가` to bring its segments into the plan. Static analysis does not invent I/O contracts, and it never changes the plan by itself.
+2. In the **계획** view, edit the graph, input/output contracts, and dependencies directly on the canvas.
 3. Write a requirement in the command box and choose `✦ Herdr 계획 요청`. The server creates a detached Git worktree at `data/jobs/<id>/worktree`, starts Herdr/Codex, and asks it to create `.factory/proposed-plan.json`.
 4. Wait for a completed job. The UI polls for status and shows `제안 그래프 적용`. **No AI output automatically overwrites your graph**. You must explicitly accept it.
 5. `서버 저장` → `계획 승인` creates an immutable timestamped snapshot under `data/approved/`.
@@ -155,7 +155,6 @@ To build from source on Mac Studio instead, use `./scripts/macos/install-server-
 - No verified production build / code signing in this delivery environment.
 - One selected repository per server instance; not a general project registry yet.
 - The static scanner works on text patterns, not a TypeScript AST. It finds the FSD source root inside the repository (set `FACTORY_SOURCE_ROOT`, relative to the repository, to choose it yourself), treats the first folder below a layer that has an index file as the slice, and resolves relative imports, `@/`, and layer aliases such as `@features/...`. Imports of a slice's public API are traced through its index re-exports to a segment; names it cannot trace are counted in `analysis.unresolvedImports` and produce no edge. Other `tsconfig` aliases, package exports, and type resolution are not handled.
-- Large repositories produce large graphs (hundreds of nodes, thousands of relations). The canvas renders them, but it has no filtering or zoom yet.
 - Planning's AI contract is JSON + schema validation, not a guarantee of architectural quality. Current AI revisions replace the entire graph *only after human approval*, not yet a minimal patch/diff merge.
 - Herdr job status is persisted, but ongoing processes are **not automatically resumed after a Factory server restart**; interrupted jobs should be inspected in Herdr.
 - No rich multiuser edit conflict management, automatic worktree cleanup, push/PR integration, or delivery stage yet.

@@ -1429,3 +1429,230 @@ body {
   font-size: 11px;
   color: #8396b2;
 }
+
+/* View switch (repository overview / plan) */
+.view-switch {
+  display: flex;
+  border: 1px solid #33425a;
+  border-radius: 9px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.view-switch button {
+  border: 0;
+  background: transparent;
+  color: #94a4be;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.view-switch button.active {
+  background: #332c57;
+  color: #d9d3ff;
+}
+.toolgroup.push-right {
+  margin-left: auto;
+}
+.topbar .layer-nav + .toolgroup.push-right {
+  margin-left: 0;
+}
+
+/* Repository overview: read-only, slice level */
+.repo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.repo-main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 16px 18px 28px;
+}
+.repo-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  color: #94a4be;
+}
+.repo-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: #94a4be;
+}
+.repo-summary strong {
+  color: #e0e9f7;
+  font-size: 13px;
+}
+.repo-lane {
+  --layer-color: #c1cad8;
+  display: flex;
+  gap: 14px;
+  border: 1px solid #33445c;
+  border-radius: 12px;
+  background: #14213766;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.repo-lane[data-layer='app'] {
+  --layer-color: #c6affb;
+}
+.repo-lane[data-layer='pages'] {
+  --layer-color: #afceff;
+}
+.repo-lane[data-layer='widgets'] {
+  --layer-color: #c4afff;
+}
+.repo-lane[data-layer='features'] {
+  --layer-color: #9be7e8;
+}
+.repo-lane[data-layer='entities'] {
+  --layer-color: #f2ca98;
+}
+.repo-lane > header {
+  width: 92px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.repo-lane-name {
+  font-size: 13px;
+  font-weight: 850;
+  letter-spacing: 1px;
+  color: var(--layer-color);
+}
+.repo-lane-count {
+  font-size: 11px;
+  color: #8297b4;
+}
+.repo-chips {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: flex-start;
+}
+.repo-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #3c5271;
+  border-radius: 7px;
+  background: #1c2c44;
+  color: #dce5f5;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.repo-chip:hover {
+  border-color: #7f93b0;
+}
+.repo-chip-count {
+  font-size: 10px;
+  color: #8297b4;
+}
+.repo-chip.selected {
+  border-color: #a596ff;
+  background: #332c57;
+  box-shadow: 0 0 0 2px #786af63c;
+}
+.repo-chip.imports {
+  border-color: #43c9b2;
+  background: #173b46;
+}
+.repo-chip.imported-by {
+  border-color: #e9a962;
+  background: #3f322d;
+}
+.repo-chip.dimmed {
+  opacity: 0.32;
+}
+.repo-detail {
+  width: 320px;
+  flex-shrink: 0;
+  overflow: auto;
+  border-left: 1px solid #33445c;
+  background: #121d2e;
+  padding: 16px;
+}
+.repo-detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.repo-detail h2 {
+  margin: 5px 0 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.repo-detail-section {
+  margin-top: 16px;
+}
+.repo-detail-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 7px;
+  font-size: 11px;
+  font-weight: 750;
+  color: #9daecb;
+}
+.repo-legend {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+.repo-legend.imports {
+  background: #43c9b2;
+}
+.repo-legend.imported-by {
+  background: #e9a962;
+}
+.repo-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.repo-tags span {
+  border: 1px solid #40506a;
+  border-radius: 5px;
+  background: #27354b;
+  padding: 3px 6px;
+  font-size: 11px;
+  color: #b8c7e0;
+}
+.repo-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+}
+.repo-links button {
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: #c7d8ec;
+  padding: 4px 6px;
+  font-size: 11px;
+  text-align: left;
+}
+.repo-links button:hover {
+  background: #26364d;
+}
+.repo-detail-actions {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}

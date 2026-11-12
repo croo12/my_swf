@@ -1,4 +1,4 @@
-// Saving, loading, approving, and analyzing plans on the Factory server.
+// Saving, loading, and approving plans on the Factory server.
 import { SCHEMA_VERSION, normalizeImported, planStore, replacePlan } from '@/entities/plan';
 import { apiRequest, errorMessage } from '@/shared/api';
 import { notify } from '@/shared/ui/toast';
@@ -35,22 +35,5 @@ export async function approveOnServer(): Promise<void> {
     notify('승인 스냅샷 저장: ' + result.file);
   } catch (err) {
     notify('승인 실패: ' + errorMessage(err));
-  }
-}
-
-/** Replaces the graph with the directory structure and imports the server finds in the repository. */
-export async function analyzeRepository(): Promise<void> {
-  if (
-    !confirm(
-      'Mac Studio 저장소의 실제 디렉터리 구조를 읽어 그래프를 교체하시겠습니까? 현재 로컬 수정 내용은 덮어씁니다.',
-    )
-  )
-    return;
-  try {
-    const result = await apiRequest<{ plan: unknown }>('/api/repository/analyze', 'POST');
-    replacePlan(normalizeImported(result.plan));
-    notify('실제 FSD 구조를 불러왔습니다. I/O는 아직 추론하지 않았습니다.');
-  } catch (err) {
-    notify('저장소 분석 실패: ' + errorMessage(err));
   }
 }
