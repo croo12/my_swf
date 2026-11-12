@@ -168,7 +168,22 @@ async fn execute_job(s:Arc<AppState>,id:String,instruction:String) {
         let data:Value=serde_json::from_str(&result).map_err(|e|format!("Workspace JSON decode failed: {e}: {result}"))?;
         let pane=data.pointer("/result/root_pane/pane_id").and_then(Value::as_str).ok_or_else(||format!("Herdr root pane id missing: {result}"))?.to_owned();
         update_job(&s,&id,"running","Codex agent 시작 중".into(),Some(agent.clone()),Some(pane.clone())).await;
-        cli(&s,&["agent","start",&agent,"--kind","codex","--pane",&pane],Duration::from_secs(65)).await?;
+        // Codex stops at interactive startup screens unless told otherwise, and Herdr then reports the
+        // agent as blocked. The job runs unattended in a worktree this server just created, so:
+        // trust that folder, skip the update notice, and let Codex write inside it without asking.
+        let trust=format!("projects.\"{repo}\".trust_level=\"trusted\"");
+        let start=["agent","start",&agent,"--kind","codex","--pane",&pane,"--",
+            "-c",&trust,"-c","check_for_update_on_startup=false",
+            "--sandbox","workspace-write","--ask-for-approval","never"];
+        // A new pane needs a moment before its shell accepts a command.
+        let mut attempt=0;
+        loop {
+            match cli(&s,&start,Duration::from_secs(65)).await {
+                Ok(_)=>break,
+                Err(e) if e.contains("agent_pane_busy") && attempt<10 => {attempt+=1;tokio::time::sleep(Duration::from_secs(1)).await;}
+                Err(e)=>return Err(e),
+            }
+        }
         let prompt=format!("You are the planning stage of a software factory. Work only in planning mode; do not modify production repository files. Inspect the repo at {repo}. Read the user's input in {} (JSON with current plan and instruction). User instruction: {}. Output a complete proposed Planning Workbench graph in JSON at {}. Required schema: {{\"schemaVersion\":\"0.3\",\"version\":1,\"nodes\":[{{\"id\":\"...\",\"path\":\"features/example/model\",\"description\":\"...\",\"inputs\":[\"...\"],\"outputs\":[\"...\"],\"x\":210,\"y\":150}}],\"edges\":[{{\"id\":\"...\",\"from\":\"node-id\",\"to\":\"node-id\",\"type\":\"imports\"}}],\"requests\":[]}}. Use FSD layers app/pages/widgets/features/entities/shared and actual segments. App/shared have two-part paths, others three-part paths. Keep existing user design changes where possible. Produce a COMPLETE JSON, no markdown. If uncertain label inferred details in description. Final response should mention the output path only.",input.display(),instruction,generated.display());
         update_job(&s,&id,"running","Codex에서 계획 생성 중".into(),Some(agent.clone()),Some(pane.clone())).await;
         cli(&s,&["agent","prompt",&agent,&prompt,"--wait","--timeout","600000"],Duration::from_secs(630)).await?;
