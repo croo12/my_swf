@@ -15,10 +15,30 @@ declare global {
 export const getBaseUrl = () => localStorage.getItem(BASE_KEY) ?? '';
 export const getApiToken = () => sessionStorage.getItem(TOKEN_KEY) ?? '';
 
-/** The URL is remembered across launches; the token only for the current app session. */
-export function saveConnection(url: string, token: string): void {
+const tauriInvoke = () => window.__TAURI__?.core?.invoke;
+
+/** True when the app can keep the token in the OS credential store (the Tauri desktop app). */
+export const hasSecureTokenStore = () => Boolean(tauriInvoke());
+
+/**
+ * The URL is remembered in localStorage. The token is kept in the OS credential store by the
+ * native side (Windows Credential Manager / macOS Keychain); in a plain browser it lasts one session.
+ */
+export async function saveConnection(url: string, token: string): Promise<void> {
   localStorage.setItem(BASE_KEY, url);
   sessionStorage.setItem(TOKEN_KEY, token);
+  await tauriInvoke()?.('save_token', { token });
+}
+
+/** Loads the stored token at startup so the user does not re-enter it on every launch. */
+export async function restoreToken(): Promise<void> {
+  if (getApiToken()) return;
+  try {
+    const token = await tauriInvoke()?.('load_token', {});
+    if (typeof token === 'string' && token) sessionStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    // An unreadable credential store only means the token has to be entered again.
+  }
 }
 
 export const isAllowedServerUrl = (url: string) =>

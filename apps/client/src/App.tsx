@@ -198,8 +198,13 @@ export function App() {
 
   const saveConnectionSettings = async (url: string, token: string) => {
     if (!isAllowedServerUrl(url)) { notify('HTTPS 서버 주소를 입력하세요. HTTP는 localhost만 허용됩니다.'); return; }
-    saveConnection(url, token);
     setConnectionOpen(false);
+    try {
+      await saveConnection(url, token);
+    } catch (err) {
+      notify('토큰을 보안 저장소에 저장하지 못했습니다: ' + errorMessage(err));
+      return;
+    }
     notify((await checkConnection()) ? '서버와 연결되었습니다.' : '연결 확인 실패: 서버 주소, 토큰, Tailscale 확인');
   };
 

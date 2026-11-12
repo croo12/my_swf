@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getApiToken, getBaseUrl } from '../api/factory';
+import { getApiToken, getBaseUrl, hasSecureTokenStore } from '../api/factory';
 
 interface ConnectionModalProps {
   onSave: (url: string, token: string) => void;
@@ -19,7 +19,7 @@ export function ConnectionModal({ onSave, onCancel }: ConnectionModalProps) {
           <input type="url" spellCheck={false} placeholder="https://mac-studio.your-tailnet.ts.net" autoComplete="url" value={url} onChange={(ev) => setUrl(ev.target.value)} />
         </label>
         <label>
-          API 토큰 (앱 세션에만 보관){' '}
+          API 토큰 ({hasSecureTokenStore() ? '이 기기의 보안 저장소에 보관' : '브라우저 세션에만 보관'}){' '}
           <input type="password" autoComplete="off" placeholder="FACTORY_API_TOKEN" value={token} onChange={(ev) => setToken(ev.target.value)} />
         </label>
         <div className="panel-actions">

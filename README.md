@@ -82,7 +82,7 @@ tailscale serve status
 
 The command displays an HTTPS hostname like `https://mac-studio.example.ts.net`. This is **Tailscale Serve, not Funnel**. On MacBook, open `⚙ 서버 연결`, enter that HTTPS hostname and `FACTORY_API_TOKEN`, then click **연결 확인**. If Serve prompts you to enable HTTPS certificates on the tailnet, follow that setup.
 
-The server binds only to loopback by default, requires a bearer token for every API route and can be accessed over Tailscale Serve. The token lives in the app's **sessionStorage** (you re-enter it when the session ends); the URL is saved locally. For production, consider OS-backed secure storage.
+The server binds only to loopback by default, requires a bearer token for every API route and can be accessed over Tailscale Serve. The desktop app keeps the token in the OS credential store (Windows Credential Manager / macOS Keychain), so you enter it once; the URL is saved locally. In a plain browser or on Android the token lasts only for the session.
 
 ## C. Using Planning
 
