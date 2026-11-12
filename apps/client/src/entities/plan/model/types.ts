@@ -7,6 +7,23 @@ export const MODULE_KINDS: readonly ModuleKind[] = ['new', 'modify', 'existing']
 
 export const MODULE_KIND_LABELS: Record<ModuleKind, string> = { new: '신규', modify: '수정', existing: '기존' };
 
+/** Something a module exposes to other modules: a component, hook, function, store, type or constant. */
+export interface ModuleInterface {
+  name: string;
+  description: string;
+  /** Props or arguments. Empty when it takes none. */
+  inputs: string[];
+  /** What it returns, renders or emits. Empty when it gives nothing back. */
+  outputs: string[];
+}
+
+/** A request a module sends to the server. The server side is outside the plan. */
+export interface ServerCall {
+  method: string;
+  path: string;
+  description: string;
+}
+
 /**
  * A module in the plan. `path` is where it is (or will be) placed: layer/slice/segment, or
  * layer/segment in app and shared. Several modules may share one placement.
@@ -23,10 +40,10 @@ export interface PlanNode {
   behaviors?: string[];
   /** Files the module consists of, relative to its placement. */
   files?: string[];
-  inputs: string[];
-  outputs: string[];
-  x: number;
-  y: number;
+  /** What the module exposes to other modules. */
+  interfaces: ModuleInterface[];
+  /** Requests to the server that originate in this module. */
+  serverCalls: ServerCall[];
 }
 
 export interface PlanEdge {

@@ -1,8 +1,7 @@
 // The plan being edited, its undo history, and local persistence.
 import { createStore } from '@/shared/lib';
 import { notify } from '@/shared/ui/toast';
-import { layoutAll, nodeY } from './layout';
-import { layerOf } from './path';
+import { normalizeImported } from './rules';
 import { clearSelection, selectionStore } from './selection';
 import type { Plan } from './types';
 
@@ -21,16 +20,12 @@ export interface PlanState {
 function loadPlan(): Plan {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
-    if (saved && Array.isArray(saved.nodes) && Array.isArray(saved.edges)) return snapToLanes(saved as Plan);
+    // Normalizing brings plans stored by an older version up to the current shape.
+    if (saved && Array.isArray(saved.nodes) && Array.isArray(saved.edges)) return normalizeImported(saved);
   } catch {
     // Unreadable storage falls back to an empty plan.
   }
   return emptyPlan();
-}
-
-/** Stored plans may carry heights from an older lane layout; the layer decides the height. */
-function snapToLanes(plan: Plan): Plan {
-  return { ...plan, nodes: plan.nodes.map((n) => ({ ...n, y: nodeY(layerOf(n)) })) };
 }
 
 export const planStore = createStore<PlanState>({ plan: loadPlan(), history: [] });
@@ -59,7 +54,7 @@ export function mutatePlan(label: string, change: (plan: Plan) => Plan): void {
 
 /** Replaces the whole plan, for example with the copy stored on the server. This is not undoable. */
 export function replacePlan(next: Plan): void {
-  planStore.set({ plan: layoutAll(next), history: [] });
+  planStore.set({ plan: next, history: [] });
   clearSelection();
 }
 

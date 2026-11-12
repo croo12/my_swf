@@ -1,22 +1,19 @@
-// User actions that change the graph: nodes, relations, layout, undo.
+// User actions that change the plan: modules, relations, placement, undo.
 import {
-  CONTENT_LEFT,
   EDGE_TYPES,
   clearSelection,
   emptyPlan,
   pathInLayer,
   type Layer,
+  type ModuleInterface,
   type ModuleKind,
+  type ServerCall,
   closeEditor,
-  commitPlan,
-  nodeY,
   layerOf,
-  layoutAll,
   mutatePlan,
   openEditor,
   planStore,
   selectionStore,
-  sliceOf,
   startConnecting,
   stopConnecting,
   undoPlan,
@@ -31,8 +28,8 @@ export interface NodeDraft {
   description: string;
   behaviors: string[];
   files: string[];
-  inputs: string[];
-  outputs: string[];
+  interfaces: ModuleInterface[];
+  serverCalls: ServerCall[];
 }
 
 /** Relation type used for the next connection, chosen in the toolbar. */
@@ -70,14 +67,10 @@ export function toggleConnectFromSelected(): void {
     return;
   }
   if (!selectedId) {
-    notify('연결할 출발 노드를 먼저 선택하세요.');
+    notify('연결할 출발 모듈을 먼저 선택하세요.');
     return;
   }
   startConnecting(selectedId);
-}
-
-export function moveNode(id: string, x: number, y: number): void {
-  commitPlan((p) => ({ ...p, nodes: p.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)) }));
 }
 
 /** Adds a blank module to place and describe by hand. */
@@ -89,14 +82,10 @@ export function addNode(): void {
     kind: 'new' as const,
     path: 'features/new-feature/model',
     description: '',
-    inputs: [],
-    outputs: [],
-    x: CONTENT_LEFT + 20,
-    y: nodeY('features'),
+    interfaces: [],
+    serverCalls: [],
   };
-  mutatePlan('새 모듈을 추가했습니다. 이름과 배치 위치를 정하세요.', (p) =>
-    layoutAll({ ...p, nodes: [...p.nodes, node] }),
-  );
+  mutatePlan('새 모듈을 추가했습니다. 이름과 배치 위치를 정하세요.', (p) => ({ ...p, nodes: [...p.nodes, node] }));
   openEditor(id);
 }
 
@@ -105,28 +94,24 @@ export function relocateNode(id: string, layer: Layer): void {
   const node = planStore.get().plan.nodes.find((n) => n.id === id);
   if (!node || layerOf(node) === layer) return;
   const path = pathInLayer(node.path, layer);
-  mutatePlan(`배치를 ${path}(으)로 옮겼습니다.`, (p) =>
-    layoutAll({ ...p, nodes: p.nodes.map((n) => (n.id === id ? { ...n, path } : n)) }),
-  );
+  mutatePlan(`배치를 ${path}(으)로 옮겼습니다.`, (p) => ({
+    ...p,
+    nodes: p.nodes.map((n) => (n.id === id ? { ...n, path } : n)),
+  }));
 }
 
 export function saveNode(id: string, draft: NodeDraft): void {
   const current = planStore.get().plan.nodes.find((n) => n.id === id);
   if (!current) return;
   const updated = { ...current, ...draft };
-  // Re-run the layout only when the node moved to another layer or slice.
-  const changedGroup = layerOf(current) !== layerOf(updated) || sliceOf(current) !== sliceOf(updated);
-  mutatePlan('노드 설계 변경이 반영되었습니다.', (p) => {
-    const next = { ...p, nodes: p.nodes.map((n) => (n.id === id ? updated : n)) };
-    return changedGroup ? layoutAll(next) : next;
-  });
+  mutatePlan('모듈 변경이 반영되었습니다.', (p) => ({ ...p, nodes: p.nodes.map((n) => (n.id === id ? updated : n)) }));
   closeEditor();
 }
 
 export function deleteNode(id: string): void {
   const node = planStore.get().plan.nodes.find((n) => n.id === id);
-  if (!node || !confirm(`${node.path} 노드와 연결을 삭제할까요?`)) return;
-  mutatePlan('노드가 삭제되었습니다.', (p) => ({
+  if (!node || !confirm(`${node.name ?? node.path} 모듈과 그 연결을 삭제할까요?`)) return;
+  mutatePlan('모듈을 삭제했습니다.', (p) => ({
     ...p,
     nodes: p.nodes.filter((n) => n.id !== id),
     edges: p.edges.filter((e) => e.from !== id && e.to !== id),
@@ -137,10 +122,6 @@ export function deleteNode(id: string): void {
 
 export function removeEdge(edgeId: string): void {
   mutatePlan('연결을 삭제했습니다.', (p) => ({ ...p, edges: p.edges.filter((e) => e.id !== edgeId) }));
-}
-
-export function autoLayout(): void {
-  mutatePlan('Layer → Slice → Segment 기준으로 정렬했습니다.', layoutAll);
 }
 
 export function undo(): void {

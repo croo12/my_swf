@@ -1,5 +1,5 @@
 // Brings one slice of the analyzed repository into the plan as existing modules, for context.
-import { kindOf, layoutAll, mutatePlan, planStore, type PlanNode } from '@/entities/plan';
+import { kindOf, mutatePlan, planStore, type PlanNode } from '@/entities/plan';
 import { repositoryStore, sliceKeyOf } from '@/entities/repository';
 import { notify } from '@/shared/ui/toast';
 
@@ -43,6 +43,6 @@ export function addSliceToPlan(sliceKey: string): void {
       known.add(`${from}>${to}>${edge.type}`);
       edges.push({ ...edge, id: `${edge.id}-${edges.length}`, from, to });
     }
-    return layoutAll({ ...plan, nodes, edges });
+    return { ...plan, nodes, edges };
   });
 }

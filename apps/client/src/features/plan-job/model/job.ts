@@ -1,5 +1,5 @@
 // A Herdr/Codex planning job: start it, poll it, and apply the proposed graph once the user accepts.
-import { SCHEMA_VERSION, layoutAll, mutatePlan, normalizeImported, planStore, type Plan } from '@/entities/plan';
+import { SCHEMA_VERSION, mutatePlan, normalizeImported, planStore, type Plan } from '@/entities/plan';
 import { apiRequest, errorMessage } from '@/shared/api';
 import { createStore } from '@/shared/lib';
 import { notify } from '@/shared/ui/toast';
@@ -87,6 +87,6 @@ export function applyProposal(): void {
   )
     return;
   if (!confirm('AI가 제안한 전체 그래프로 교체합니다. 적용 후 되돌리기가 가능합니다. 계속할까요?')) return;
-  mutatePlan('AI 제안을 현재 계획에 적용했습니다.', () => layoutAll(proposal));
+  mutatePlan('AI 제안을 현재 계획에 적용했습니다.', () => proposal);
   jobStore.set(null);
 }

@@ -1,5 +1,5 @@
 // Plan JSON files: download the current plan, or load one from disk.
-import { SCHEMA_VERSION, clearSelection, layoutAll, mutatePlan, normalizeImported, planStore } from '@/entities/plan';
+import { SCHEMA_VERSION, clearSelection, mutatePlan, normalizeImported, planStore } from '@/entities/plan';
 import { errorMessage } from '@/shared/api';
 import { notify } from '@/shared/ui/toast';
 
@@ -24,7 +24,7 @@ export function exportPlan(): void {
 /** Replaces the graph with the plan in the file. The import can be undone. */
 export async function importPlanFile(file: File): Promise<void> {
   try {
-    const parsed = layoutAll(normalizeImported(JSON.parse(await file.text())));
+    const parsed = normalizeImported(JSON.parse(await file.text()));
     mutatePlan('설계를 불러왔습니다.', () => parsed);
     clearSelection();
   } catch (err) {

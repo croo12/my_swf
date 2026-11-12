@@ -1765,3 +1765,177 @@ body {
   padding: 4px 2px;
   flex-shrink: 0;
 }
+
+/* Automatic layout: the canvas is as large as the graph, lanes are sized by their content. */
+.workspace {
+  min-width: 0;
+  min-height: 0;
+}
+.lane-bar {
+  width: 150px;
+  padding: 14px 14px;
+  gap: 5px;
+}
+.lane-name {
+  font-size: 15px;
+}
+.lane-count {
+  margin-top: 2px;
+}
+.slice-group {
+  border-radius: 12px;
+}
+
+/* Relations: orthogonal lines, no labels. Selecting a module highlights its relations. */
+.edges path.edge-path {
+  fill: none;
+  stroke: #6f86a6;
+  stroke-width: 1.6;
+  opacity: 0.85;
+  stroke-dasharray: none;
+}
+.edges path.edge-path.active {
+  stroke: #b9a6ff;
+  stroke-width: 2.4;
+  opacity: 1;
+}
+.edges path.edge-path.muted {
+  opacity: 0.14;
+}
+.edges path.edge-path.invalid {
+  stroke: #fc878b;
+  stroke-width: 2.4;
+  opacity: 1;
+}
+.edges path.edge-path.server {
+  stroke: #e9a962;
+  stroke-dasharray: 6 5;
+}
+.edges marker path {
+  stroke: none;
+}
+.edges #arrow path {
+  fill: #6f86a6;
+}
+.edges #arrowActive path {
+  fill: #b9a6ff;
+}
+.edges #arrowDanger path {
+  fill: #fc878b;
+}
+.edges #arrowServer path {
+  fill: #e9a962;
+}
+
+/* Module card: interfaces instead of one input/output pair */
+.node-interfaces {
+  border-top: 1px solid #2a3850;
+  padding: 9px 12px 10px;
+  min-width: 0;
+}
+.node-interfaces .io-label {
+  margin-bottom: 6px;
+}
+.node-bottom {
+  gap: 8px;
+}
+.node-bottom > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-server {
+  color: #f0be80 !important;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Server boundary: where the plan ends */
+.server-boundary {
+  position: absolute;
+  z-index: 3;
+  border: 1px dashed #b0834f;
+  border-radius: 12px;
+  background: #2a2118;
+  overflow: hidden;
+}
+.server-boundary header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 14px 8px;
+}
+.server-boundary strong {
+  font-size: 13px;
+  color: #f2ca98;
+  letter-spacing: 0.5px;
+}
+.server-boundary header span {
+  font-size: 10px;
+  color: #b59b7c;
+}
+.server-endpoint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 14px;
+  font-size: 11px;
+  border-top: 1px solid #44382a;
+}
+.server-method {
+  font-weight: 800;
+  font-size: 10px;
+  color: #f0be80;
+  width: 46px;
+}
+.server-path {
+  color: #e6d9c6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+/* Editor: one card per interface or server call */
+.edit-card {
+  border: 1px solid #394b68;
+  border-radius: 9px;
+  padding: 8px;
+  margin: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #142033;
+}
+.edit-card-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.edit-card-head input {
+  flex: 1;
+  min-width: 0;
+}
+.field .edit-card-head select {
+  width: 84px;
+  flex-shrink: 0;
+}
+.edit-card-io {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.field .edit-card textarea {
+  min-height: 44px;
+}
+.field > .btn.tiny {
+  margin-top: 2px;
+}
+
+/* Lanes span the visible width even when the graph is narrower than the window. */
+.workspace {
+  min-width: 100%;
+}

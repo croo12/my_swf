@@ -14,7 +14,7 @@ software-factory-multiplatform/
 │   │   ├── pages/workbench/     # The single screen, composed from widgets
 │   │   ├── widgets/             # workbench-header, repository-overview, plan-canvas, command-bar
 │   │   ├── features/            # edit-graph, record-request, analyze-repository, add-slice-to-plan, switch-view, connect-server, server-sync, plan-transfer, plan-job
-│   │   ├── entities/            # plan (schema v0.3, layout, validation, stores, node/edge UI), repository (slice-level scan)
+│   │   ├── entities/            # plan (schema, ELK layout, validation, stores, module/edge UI), repository (slice-level scan)
 │   │   └── shared/              # api (Factory transport), lib (store), ui (toast)
 │   ├── package.json             # Tauri / Vite commands, plus `npm run check` (tsc, oxlint, steiger, oxfmt)
 │   └── src-tauri/               # Native Rust client for macOS/Windows/Android
@@ -93,10 +93,10 @@ The app has two views, switched in the header.
 
 **계획 (plan)** is where work is designed. A plan starts empty: it holds the modules to build or change, and where each one is placed.
 
-1. Write what you want built in the request box and press `✦ 계획 요청`. The server runs Codex in a Herdr workspace, read-only, and asks for the modules: responsibility, behaviors, interface, placement (layer / slice / segment), files, and dependencies.
+1. Write what you want built in the request box and press `✦ 계획 요청`. The server runs Codex in a Herdr workspace, read-only, and asks for the modules: responsibility, behaviors, the interfaces each module exposes (each with its own inputs and outputs, where it has any), the requests it sends to the server, placement (layer / slice / segment), files, and dependencies.
 2. The answer is constrained to a JSON Schema and then checked by the server against fixed rules and against the repository (see `docs/ARCHITECTURE.md`). **A proposal that breaks any rule is rejected as a whole**, and the job reports every violation. Nothing is repaired or guessed.
 3. A proposal that passes shows `제안 그래프 적용`. **No AI output changes your plan by itself**; you accept it explicitly, and you can undo it.
-4. Edit modules on the canvas: click to edit, drag sideways to arrange, drag into another layer to change the placement. `＋ 노드` adds a module by hand.
+4. Edit modules on the canvas: click to edit, drag into another layer to change the placement. `＋ 모듈` adds a module by hand. The graph is laid out automatically (ELK): only the layers the plan touches are shown, relations are drawn as orthogonal lines, and selecting a module highlights its relations. Requests to the server appear as a server box below the layers, reached from the `shared/api` modules.
 5. `서버 ▾ → 서버에 저장` then `계획 승인` creates an immutable timestamped snapshot under `data/approved/`.
 
 A request is addressed to the selected module or to the whole plan; the target is shown next to the request box.

@@ -16,11 +16,28 @@ import {
 import { useStore } from '@/shared/lib';
 import { deleteNode, removeEdge, saveNode } from '../model/actions';
 
+const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
 const lines = (text: string) =>
   text
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean);
+
+/** Rows of the interface list while it is being edited; inputs and outputs are one entry per line. */
+interface InterfaceRow {
+  key: number;
+  name: string;
+  description: string;
+  inputs: string;
+  outputs: string;
+}
+interface CallRow {
+  key: number;
+  method: string;
+  path: string;
+  description: string;
+}
 
 /** Side panel for editing the selected module. Renders nothing while no editor is open. */
 export function NodeEditor() {
@@ -39,13 +56,35 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
   const [description, setDescription] = useState(node.description);
   const [behaviors, setBehaviors] = useState((node.behaviors ?? []).join('\n'));
   const [files, setFiles] = useState((node.files ?? []).join('\n'));
-  const [inputs, setInputs] = useState(node.inputs.join('\n'));
-  const [outputs, setOutputs] = useState(node.outputs.join('\n'));
+  const [interfaces, setInterfaces] = useState<InterfaceRow[]>(() =>
+    node.interfaces.map((item, key) => ({
+      key,
+      name: item.name,
+      description: item.description,
+      inputs: item.inputs.join('\n'),
+      outputs: item.outputs.join('\n'),
+    })),
+  );
+  const [calls, setCalls] = useState<CallRow[]>(() => node.serverCalls.map((call, key) => ({ key, ...call })));
+  const [nextKey, setNextKey] = useState(node.interfaces.length + node.serverCalls.length);
   const [invalid, setInvalid] = useState(false);
 
   const pathParts = cleanPath(path).split('/').filter(Boolean);
   const related = edges.filter((e) => e.from === node.id || e.to === node.id);
   const other = (e: PlanEdge) => nodes.find((n) => n.id === (e.from === node.id ? e.to : e.from));
+
+  const patchInterface = (key: number, change: Partial<InterfaceRow>) =>
+    setInterfaces((rows) => rows.map((row) => (row.key === key ? { ...row, ...change } : row)));
+  const patchCall = (key: number, change: Partial<CallRow>) =>
+    setCalls((rows) => rows.map((row) => (row.key === key ? { ...row, ...change } : row)));
+  const addInterface = () => {
+    setInterfaces((rows) => [...rows, { key: nextKey, name: '', description: '', inputs: '', outputs: '' }]);
+    setNextKey(nextKey + 1);
+  };
+  const addCall = () => {
+    setCalls((rows) => [...rows, { key: nextKey, method: 'GET', path: '/', description: '' }]);
+    setNextKey(nextKey + 1);
+  };
 
   const save = () => {
     const cleaned = cleanPath(path);
@@ -60,8 +99,17 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
       description: description.trim(),
       behaviors: lines(behaviors),
       files: lines(files),
-      inputs: lines(inputs),
-      outputs: lines(outputs),
+      interfaces: interfaces
+        .filter((row) => row.name.trim())
+        .map((row) => ({
+          name: row.name.trim(),
+          description: row.description.trim(),
+          inputs: lines(row.inputs),
+          outputs: lines(row.outputs),
+        })),
+      serverCalls: calls
+        .filter((row) => row.path.trim())
+        .map((row) => ({ method: row.method, path: row.path.trim(), description: row.description.trim() })),
     });
   };
 
@@ -129,8 +177,102 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
           <label htmlFor="editBehaviors">동작 · 한 줄에 하나씩</label>
           <textarea id="editBehaviors" rows={3} value={behaviors} onChange={(ev) => setBehaviors(ev.target.value)} />
         </div>
+
         <div className="field">
-          <label htmlFor="editFiles">파일 · 한 줄에 하나씩 (선택)</label>
+          <label>인터페이스 · 모듈 바깥으로 노출하는 것</label>
+          {interfaces.length === 0 && <div className="help">노출하는 인터페이스 없음</div>}
+          {interfaces.map((row) => (
+            <div key={row.key} className="edit-card">
+              <div className="edit-card-head">
+                <input
+                  aria-label="인터페이스 이름"
+                  spellCheck={false}
+                  placeholder="이름 (예: cancelJob, JobBar)"
+                  value={row.name}
+                  onChange={(ev) => patchInterface(row.key, { name: ev.target.value })}
+                />
+                <button
+                  className="textbtn"
+                  onClick={() => setInterfaces((rows) => rows.filter((r) => r.key !== row.key))}
+                >
+                  삭제
+                </button>
+              </div>
+              <input
+                aria-label="인터페이스 설명"
+                placeholder="설명 (선택)"
+                value={row.description}
+                onChange={(ev) => patchInterface(row.key, { description: ev.target.value })}
+              />
+              <div className="edit-card-io">
+                <textarea
+                  aria-label="입력"
+                  rows={2}
+                  spellCheck={false}
+                  placeholder="입력 · 한 줄에 하나 (없으면 비움)"
+                  value={row.inputs}
+                  onChange={(ev) => patchInterface(row.key, { inputs: ev.target.value })}
+                />
+                <textarea
+                  aria-label="출력"
+                  rows={2}
+                  spellCheck={false}
+                  placeholder="출력 · 한 줄에 하나 (없으면 비움)"
+                  value={row.outputs}
+                  onChange={(ev) => patchInterface(row.key, { outputs: ev.target.value })}
+                />
+              </div>
+            </div>
+          ))}
+          <button className="btn tiny" onClick={addInterface}>
+            ＋ 인터페이스
+          </button>
+        </div>
+
+        <div className="field">
+          <label>서버 호출 · 이 모듈에서 시작되는 요청</label>
+          {calls.length === 0 && <div className="help">서버 호출 없음</div>}
+          {calls.map((row) => (
+            <div key={row.key} className="edit-card">
+              <div className="edit-card-head">
+                <select
+                  aria-label="메서드"
+                  value={row.method}
+                  onChange={(ev) => patchCall(row.key, { method: ev.target.value })}
+                >
+                  {METHODS.map((method) => (
+                    <option key={method} value={method}>
+                      {method}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  aria-label="경로"
+                  spellCheck={false}
+                  placeholder="/api/..."
+                  value={row.path}
+                  onChange={(ev) => patchCall(row.key, { path: ev.target.value })}
+                />
+                <button className="textbtn" onClick={() => setCalls((rows) => rows.filter((r) => r.key !== row.key))}>
+                  삭제
+                </button>
+              </div>
+              <input
+                aria-label="서버 호출 설명"
+                placeholder="설명 (선택)"
+                value={row.description}
+                onChange={(ev) => patchCall(row.key, { description: ev.target.value })}
+              />
+            </div>
+          ))}
+          <button className="btn tiny" onClick={addCall}>
+            ＋ 서버 호출
+          </button>
+          <div className="help">서버 호출이 있는 모듈은 shared/api 모듈을 거쳐야 합니다.</div>
+        </div>
+
+        <div className="field">
+          <label htmlFor="editFiles">파일 · 한 줄에 하나씩</label>
           <textarea
             id="editFiles"
             rows={2}
@@ -138,26 +280,6 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
             placeholder="cancel-job.ts"
             value={files}
             onChange={(ev) => setFiles(ev.target.value)}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="editInputs">INPUT · 한 줄에 하나씩</label>
-          <textarea
-            id="editInputs"
-            rows={3}
-            spellCheck={false}
-            value={inputs}
-            onChange={(ev) => setInputs(ev.target.value)}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="editOutputs">OUTPUT · 한 줄에 하나씩</label>
-          <textarea
-            id="editOutputs"
-            rows={3}
-            spellCheck={false}
-            value={outputs}
-            onChange={(ev) => setOutputs(ev.target.value)}
           />
         </div>
         <div className="field">

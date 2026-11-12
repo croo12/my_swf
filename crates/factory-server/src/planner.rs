@@ -10,6 +10,8 @@ use std::collections::{HashMap, HashSet};
 
 pub const MAX_MODULES: usize = 60;
 /// File types that can live in the FSD layers. A plan cannot place other code (for example Rust) there.
+/// The segment of the shared layer through which every request to the server passes.
+const API_SEGMENT: &str = "api";
 const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mts", "mjs", "css", "scss", "json"];
 
 /// What the validator needs to know about the repository.
@@ -55,8 +57,33 @@ impl Kind {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Interface {
+    /// Name of the exported thing: a component, hook, function, store, type or constant.
+    pub name: String,
+    pub description: String,
+    /// What this interface takes (props, arguments). May be empty.
     pub inputs: Vec<String>,
+    /// What this interface gives back (return value, rendered UI, events). May be empty.
     pub outputs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Method { Get, Post, Put, Patch, Delete }
+
+impl Method {
+    fn name(self) -> &'static str {
+        match self { Method::Get => "GET", Method::Post => "POST", Method::Put => "PUT", Method::Patch => "PATCH", Method::Delete => "DELETE" }
+    }
+}
+
+/// A request the module sends to the server. This is how a plan shows where the client reaches
+/// outside itself; the server side is not planned.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerCall {
+    pub method: Method,
+    pub path: String,
+    pub description: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,7 +99,11 @@ pub struct Module {
     pub responsibility: String,
     /// What the module does, one behavior per entry.
     pub behaviors: Vec<String>,
-    pub interface: Interface,
+    /// What the module exposes to other modules. Each entry has its own inputs and outputs.
+    pub interfaces: Vec<Interface>,
+    /// Requests to the server that originate in this module.
+    #[serde(rename = "serverCalls")]
+    pub server_calls: Vec<ServerCall>,
     pub files: Vec<String>,
 }
 
@@ -106,7 +137,6 @@ pub struct Proposal {
 /// JSON Schema given to the agent. Every property is required and no extra properties are
 /// allowed, so the answer cannot carry anything outside this shape.
 pub fn output_schema() -> Value {
-    let strings = json!({"type":"array","items":{"type":"string"}});
     json!({
         "type":"object","additionalProperties":false,
         "required":["summary","modules","dependencies"],
@@ -114,7 +144,7 @@ pub fn output_schema() -> Value {
             "summary":{"type":"string","description":"What the plan builds, in two or three sentences."},
             "modules":{"type":"array","items":{
                 "type":"object","additionalProperties":false,
-                "required":["id","name","kind","layer","slice","segment","responsibility","behaviors","interface","files"],
+                "required":["id","name","kind","layer","slice","segment","responsibility","behaviors","interfaces","serverCalls","files"],
                 "properties":{
                     "id":{"type":"string","description":"Unique id within this plan."},
                     "name":{"type":"string","description":"Short module name."},
@@ -125,9 +155,21 @@ pub fn output_schema() -> Value {
                     "segment":{"type":"string","description":"Segment inside the slice (or inside app/shared), e.g. ui, model, api."},
                     "responsibility":{"type":"string","description":"The single responsibility of the module."},
                     "behaviors":{"type":"array","items":{"type":"string"},"description":"What the module does, one behavior per entry."},
-                    "interface":{"type":"object","additionalProperties":false,"required":["inputs","outputs"],
-                        "properties":{"inputs":strings.clone(),"outputs":strings.clone()},
-                        "description":"What the module takes and what it provides: props, arguments, events, exported values."},
+                    "interfaces":{"type":"array","description":"What the module exposes to other modules. One entry per exported component, hook, function, store, type or constant.",
+                        "items":{"type":"object","additionalProperties":false,"required":["name","description","inputs","outputs"],
+                            "properties":{
+                                "name":{"type":"string","description":"Exported name."},
+                                "description":{"type":"string"},
+                                "inputs":{"type":"array","items":{"type":"string"},"description":"Props or arguments of this interface. Empty when it takes none."},
+                                "outputs":{"type":"array","items":{"type":"string"},"description":"What this interface returns, renders or emits. Empty when it gives nothing back."}
+                            }}},
+                    "serverCalls":{"type":"array","description":"Requests to the server that originate in this module. Empty when it makes none.",
+                        "items":{"type":"object","additionalProperties":false,"required":["method","path","description"],
+                            "properties":{
+                                "method":{"type":"string","enum":["GET","POST","PUT","PATCH","DELETE"]},
+                                "path":{"type":"string","description":"Request path, starting with /."},
+                                "description":{"type":"string"}
+                            }}},
                     "files":{"type":"array","items":{"type":"string"},"description":"File names inside the placement."}
                 }
             }},
@@ -193,10 +235,22 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
         // Behavior and interface are what make a module reviewable; planned work must state them.
         if m.kind != Kind::Existing {
             if m.behaviors.iter().all(|b| b.trim().is_empty()) { errors.push(format!("Module \"{label}\" ({}) states no behavior.", m.kind.name())); }
-            if m.interface.inputs.is_empty() && m.interface.outputs.is_empty() { errors.push(format!("Module \"{label}\" ({}) has an empty interface.", m.kind.name())); }
+            if m.interfaces.is_empty() { errors.push(format!("Module \"{label}\" ({}) exposes no interface.", m.kind.name())); }
         }
-        if m.behaviors.iter().chain(&m.interface.inputs).chain(&m.interface.outputs).any(|s| s.trim().is_empty()) {
-            errors.push(format!("Module \"{label}\" has an empty behavior or interface entry."));
+        if m.behaviors.iter().any(|b| b.trim().is_empty()) { errors.push(format!("Module \"{label}\" has an empty behavior entry.")); }
+        // An interface is something the module exposes; its inputs and outputs are optional.
+        let mut interface_names = HashSet::new();
+        for interface in &m.interfaces {
+            if interface.name.trim().is_empty() { errors.push(format!("Module \"{label}\" has an interface without a name.")); }
+            else if !interface_names.insert(interface.name.as_str()) { errors.push(format!("Module \"{label}\" lists the interface \"{}\" more than once.", interface.name)); }
+            if interface.inputs.iter().chain(&interface.outputs).any(|s| s.trim().is_empty()) {
+                errors.push(format!("Module \"{label}\": interface \"{}\" has an empty input or output entry.", interface.name));
+            }
+        }
+        for call in &m.server_calls {
+            if !call.path.starts_with('/') || call.path.contains(char::is_whitespace) {
+                errors.push(format!("Module \"{label}\": server call path \"{}\" must start with / and contain no spaces.", call.path));
+            }
         }
 
         // Claims about the repository are checked against the repository.
@@ -226,11 +280,32 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
     for m in modules.iter().filter(|m| m.kind == Kind::Existing) {
         if !depended_on.contains(m.id.as_str()) { errors.push(format!("Existing module \"{}\" is in the plan but nothing depends on it.", m.name)); }
     }
+    // Requests to the server go through the shared API layer: a module that calls the server is
+    // either placed in shared/api or reaches a shared/api module through its dependencies.
+    let is_api = |id: &str| by_id.get(id).is_some_and(|m| m.layer == Layer::Shared && m.segment == API_SEGMENT);
+    for m in modules.iter().filter(|m| !m.server_calls.is_empty() && !is_api(m.id.as_str())) {
+        if !reaches(m.id.as_str(), &graph, &is_api) {
+            errors.push(format!("Module \"{}\" calls the server but does not depend, directly or indirectly, on a module in shared/{API_SEGMENT}.", m.name));
+        }
+    }
     if let Some(id) = find_cycle(&graph) {
         let name = by_id.get(id).map(|m| m.name.as_str()).unwrap_or(id);
         errors.push(format!("The dependencies form a cycle through \"{name}\"."));
     }
     errors
+}
+
+/// Whether a module matching `is_target` can be reached from `start` by following dependencies.
+fn reaches<'a>(start: &'a str, graph: &HashMap<&'a str, Vec<&'a str>>, is_target: &dyn Fn(&str) -> bool) -> bool {
+    let (mut seen, mut stack) = (HashSet::new(), vec![start]);
+    while let Some(node) = stack.pop() {
+        if !seen.insert(node) { continue; }
+        for &next in graph.get(node).into_iter().flatten() {
+            if is_target(next) { return true; }
+            stack.push(next);
+        }
+    }
+    false
 }
 
 /// Returns a module id that lies on a dependency cycle, if there is one.
@@ -254,7 +329,9 @@ pub fn to_plan(proposal: &Proposal) -> Value {
     let nodes: Vec<Value> = proposal.modules.iter().map(|m| json!({
         "id":m.id,"name":m.name,"kind":m.kind.name(),"path":m.path(),
         "description":m.responsibility,"behaviors":m.behaviors,
-        "inputs":m.interface.inputs,"outputs":m.interface.outputs,"files":m.files,"x":0,"y":0
+        "interfaces":m.interfaces.iter().map(|i| json!({"name":i.name,"description":i.description,"inputs":i.inputs,"outputs":i.outputs})).collect::<Vec<_>>(),
+        "serverCalls":m.server_calls.iter().map(|c| json!({"method":c.method.name(),"path":c.path,"description":c.description})).collect::<Vec<_>>(),
+        "files":m.files,"x":0,"y":0
     })).collect();
     let edges: Vec<Value> = proposal.dependencies.iter().enumerate().map(|(i, d)| json!({
         "id":format!("dep-{}",i + 1),"from":d.from,"to":d.to,"type":"imports"
@@ -268,7 +345,7 @@ mod tests {
 
     fn module(id: &str, kind: &str, layer: &str, slice: Option<&str>, segment: &str) -> Value {
         json!({"id":id,"name":id,"kind":kind,"layer":layer,"slice":slice,"segment":segment,"responsibility":"does one thing",
-            "behaviors":["does it"],"interface":{"inputs":["in"],"outputs":["out"]},"files":["a.ts"]})
+            "behaviors":["does it"],"interfaces":[{"name":"thing","description":"d","inputs":[],"outputs":["out"]}],"serverCalls":[],"files":["a.ts"]})
     }
     fn proposal(modules: Vec<Value>, dependencies: Vec<(&str, &str)>) -> Proposal {
         let deps: Vec<Value> = dependencies.into_iter().map(|(from, to)| json!({"from":from,"to":to})).collect();
@@ -337,10 +414,10 @@ mod tests {
     fn rejects_missing_behavior_interface_and_dangling_dependencies() {
         let mut m = module("a", "new", "features", Some("x"), "ui");
         m["behaviors"] = json!([]);
-        m["interface"] = json!({"inputs":[],"outputs":[]});
+        m["interfaces"] = json!([]);
         let p = proposal(vec![m], vec![("a", "nowhere")]);
         let errors = check(&p, &[]);
-        assert!(has(&errors, "states no behavior") && has(&errors, "empty interface") && has(&errors, "not in the plan"));
+        assert!(has(&errors, "states no behavior") && has(&errors, "exposes no interface") && has(&errors, "not in the plan"));
     }
 
     #[test]
@@ -357,6 +434,42 @@ mod tests {
         assert!(has(&errors, "missing.ts does not exist"), "{errors:?}");
         assert!(has(&errors, "not a source file that belongs in the FSD layers"), "{errors:?}");
         assert!(has(&errors, "already exists"), "{errors:?}");
+    }
+
+    #[test]
+    fn an_interface_needs_a_name_but_not_inputs_or_outputs() {
+        let mut bare = module("a", "new", "features", Some("x"), "ui");
+        bare["interfaces"] = json!([{"name":"Thing","description":"","inputs":[],"outputs":[]}]);
+        assert_eq!(check(&proposal(vec![bare], vec![]), &[]), Vec::<String>::new());
+        let mut bad = module("b", "new", "features", Some("x"), "ui");
+        bad["interfaces"] = json!([{"name":"","description":"","inputs":[],"outputs":[]},{"name":"A","description":"","inputs":[],"outputs":[]},{"name":"A","description":"","inputs":[],"outputs":[]}]);
+        let errors = check(&proposal(vec![bad], vec![]), &[]);
+        assert!(has(&errors, "without a name") && has(&errors, "more than once"), "{errors:?}");
+    }
+
+    #[test]
+    fn server_calls_must_pass_through_shared_api() {
+        let call = json!([{"method":"POST","path":"/api/jobs/{id}/cancel","description":"cancel"}]);
+        let mut model = module("model", "new", "features", Some("cancel"), "model");
+        model["serverCalls"] = call.clone();
+        let ui = module("ui", "new", "features", Some("cancel"), "ui");
+        let api = module("api", "existing", "shared", None, "api");
+        let lib = module("lib", "existing", "shared", None, "lib");
+        // Directly, indirectly, or by being in shared/api itself: accepted.
+        assert_eq!(check(&proposal(vec![model.clone(), api.clone()], vec![("model", "api")]), &["shared/api"]), Vec::<String>::new());
+        let mut ui_calls = ui.clone();
+        ui_calls["serverCalls"] = call.clone();
+        let mut plain_model = model.clone();
+        plain_model["serverCalls"] = json!([]);
+        assert_eq!(check(&proposal(vec![ui_calls, plain_model, api.clone()], vec![("ui", "model"), ("model", "api")]), &["shared/api"]), Vec::<String>::new());
+        // Bypassing shared/api, or a malformed path: rejected.
+        let errors = check(&proposal(vec![model.clone(), lib], vec![("model", "lib")]), &["shared/lib"]);
+        assert!(has(&errors, "does not depend, directly or indirectly, on a module in shared/api"), "{errors:?}");
+        let mut bad_path = model;
+        bad_path["serverCalls"] = json!([{"method":"GET","path":"api/x","description":""}]);
+        assert!(has(&check(&proposal(vec![bad_path, api], vec![("model", "api")]), &["shared/api"]), "must start with /"));
+        let unknown_method = json!({"summary":"s","dependencies":[],"modules":[{"id":"a","name":"a","kind":"new","layer":"shared","slice":null,"segment":"api","responsibility":"r","behaviors":["b"],"interfaces":[],"serverCalls":[{"method":"FETCH","path":"/x","description":""}],"files":["a.ts"]}]});
+        assert!(serde_json::from_value::<Proposal>(unknown_method).is_err());
     }
 
     #[test]

@@ -1,5 +1,3 @@
-import { useRef } from 'react';
-import { laneY, type Layer } from '@/entities/plan';
 import { ConnectionModal } from '@/features/connect-server';
 import { NodeEditor } from '@/features/edit-graph';
 import { viewStore } from '@/features/switch-view';
@@ -16,17 +14,15 @@ import { WorkbenchHeader } from '@/widgets/workbench-header';
  */
 export function WorkbenchPage() {
   const view = useStore(viewStore);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const jumpToLayer = (layer: Layer) => scrollRef.current?.scrollTo({ top: laneY(layer) - 18, behavior: 'smooth' });
 
   return (
     <>
       <div className="app">
-        <WorkbenchHeader onJumpToLayer={jumpToLayer} />
+        <WorkbenchHeader />
         <main className="stage">
           {view === 'plan' ? (
             <>
-              <PlanCanvas scrollRef={scrollRef} />
+              <PlanCanvas />
               <NodeEditor />
             </>
           ) : (

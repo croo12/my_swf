@@ -66,9 +66,15 @@ fn validate_plan(plan: &Value) -> Result<(), ApiError> {
         };
         if !valid || parts.iter().any(|p|p.is_empty()||*p=="..") {return Err(err(StatusCode::BAD_REQUEST,format!("Invalid FSD path: {path}")));}
         if !ids.insert(id) {return Err(err(StatusCode::BAD_REQUEST,format!("Duplicate id: {id}")));}
-        for field in ["inputs","outputs"] {
-            if !n.get(field).and_then(Value::as_array).is_some_and(|a| a.iter().all(Value::is_string)) {
-                return Err(err(StatusCode::BAD_REQUEST,format!("node {id}: {field} must be string array")));
+        // Interfaces carry their own inputs and outputs; plans saved by older clients may still
+        // have them on the node. Either way, where present they must be lists of strings.
+        let string_list=|v:Option<&Value>|v.is_none_or(|v|v.as_array().is_some_and(|a|a.iter().all(Value::is_string)));
+        if !string_list(n.get("inputs")) || !string_list(n.get("outputs")) {
+            return Err(err(StatusCode::BAD_REQUEST,format!("node {id}: inputs and outputs must be string arrays")));
+        }
+        for interface in n.get("interfaces").and_then(Value::as_array).into_iter().flatten() {
+            if interface.get("name").and_then(Value::as_str).is_none_or(|name|name.trim().is_empty()) || !string_list(interface.get("inputs")) || !string_list(interface.get("outputs")) {
+                return Err(err(StatusCode::BAD_REQUEST,format!("node {id}: every interface needs a name and string arrays for inputs and outputs")));
             }
         }
     }
@@ -157,13 +163,14 @@ FSD source root (relative to the repository): {source_root}
 
 Request: {instruction}
 
-Read the code the request touches. Then answer with the modules to build or change: what each one is responsible for, what it does, its interface, where it is placed (layer, slice, segment), and which modules it imports from. A module is a unit with one responsibility that a developer can implement and review on its own. Write names and descriptions in the language of the request.
+Read the code the request touches. Then answer with the modules to build or change: what each one is responsible for, what it does, what it exposes to other modules (its interfaces, each with its own inputs and outputs where it has any), which requests it sends to the server, where it is placed (layer, slice, segment), and which modules it imports from. A module is a unit with one responsibility that a developer can implement and review on its own. Write names and descriptions in the language of the request.
 
 Your answer is checked by a program and rejected as a whole if any of these is not true:
 - Every module has a name, a responsibility, and a placement in one of the six FSD layers. pages, widgets, features and entities need a slice; app and shared have none.
 - A module marked "modify" or "existing" is at a placement that exists in the repository (list below), and every file it names exists there. "existing" modules are included only when another module in the plan imports from them.
 - Every module names its files. A "new" module names files that do not exist yet. Only client source files (ts, tsx, js, jsx, css, scss, json) can be planned; code outside the FSD layers is not part of a plan.
-- Every "new" or "modify" module states at least one behavior and a non-empty interface.
+- Every "new" or "modify" module states at least one behavior and exposes at least one named interface. Inputs and outputs of an interface may be empty.
+- A module that sends requests to the server is placed in shared/api or depends, directly or indirectly, on a module in shared/api. Server calls have a path starting with /.
 - A dependency points to a lower layer, or stays inside one slice. There are no cycles, no duplicates, and no dependencies that start at an "existing" module.
 
 The plan so far (keep these modules unless the request requires changing them):

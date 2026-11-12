@@ -1,6 +1,15 @@
 // Validation of plans and of the relations inside them.
 import { isDirectLayer, isLayer, layerIndex, layerOf, sliceOf } from './path';
-import { MODULE_KINDS, type ModuleKind, type Plan, type PlanEdge, type PlanNode, type PlanRequest } from './types';
+import {
+  MODULE_KINDS,
+  type ModuleInterface,
+  type ModuleKind,
+  type Plan,
+  type PlanEdge,
+  type PlanNode,
+  type PlanRequest,
+  type ServerCall,
+} from './types';
 
 /** An "imports" edge may only point to a lower layer, or stay within one slice (or within app/shared). */
 export function isInvalidEdge(edge: PlanEdge, nodes: PlanNode[]): boolean {
@@ -17,6 +26,33 @@ export function isInvalidEdge(edge: PlanEdge, nodes: PlanNode[]): boolean {
 }
 
 type Loose = Record<string, unknown>;
+
+function interfacesOf(n: Loose, fallbackName: string): ModuleInterface[] {
+  if (Array.isArray(n.interfaces)) {
+    return (n.interfaces as Loose[])
+      .filter((item) => typeof item?.name === 'string' && item.name.trim())
+      .map((item) => ({
+        name: String(item.name).trim(),
+        description: String(item.description ?? ''),
+        inputs: stringArray(item.inputs),
+        outputs: stringArray(item.outputs),
+      }));
+  }
+  // Plans made before interfaces existed kept one list of inputs and outputs on the module.
+  const [inputs, outputs] = [stringArray(n.inputs), stringArray(n.outputs)];
+  return inputs.length + outputs.length > 0 ? [{ name: fallbackName, description: '', inputs, outputs }] : [];
+}
+
+function serverCallsOf(n: Loose): ServerCall[] {
+  if (!Array.isArray(n.serverCalls)) return [];
+  return (n.serverCalls as Loose[])
+    .filter((call) => typeof call?.path === 'string' && call.path.trim())
+    .map((call) => ({
+      method: String(call.method ?? 'GET').toUpperCase(),
+      path: String(call.path).trim(),
+      description: String(call.description ?? ''),
+    }));
+}
 const stringArray = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : []);
 
 /** Validates and normalizes a plan from a file, the server, or an AI proposal. Throws on unusable input. */
@@ -46,10 +82,11 @@ export function normalizeImported(data: unknown): Plan {
       description: String(n.description ?? ''),
       behaviors: stringArray(n.behaviors),
       files: stringArray(n.files),
-      inputs: stringArray(n.inputs),
-      outputs: stringArray(n.outputs),
-      x: Number(n.x) || 0,
-      y: Number(n.y) || 0,
+      interfaces: interfacesOf(
+        n,
+        typeof n.name === 'string' && n.name.trim() ? n.name.trim() : (parts.at(-1) ?? 'module'),
+      ),
+      serverCalls: serverCallsOf(n),
     };
   });
   const known = new Set(nodes.map((n) => n.id));

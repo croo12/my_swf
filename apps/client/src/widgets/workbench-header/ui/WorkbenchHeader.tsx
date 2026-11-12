@@ -1,8 +1,8 @@
 import { useRef } from 'react';
-import { EDGE_TYPES, LAYERS, planStore, selectionStore, type Layer } from '@/entities/plan';
+import { EDGE_TYPES, planStore, selectionStore } from '@/entities/plan';
 import { analyzeRepository } from '@/features/analyze-repository';
 import { openConnectionDialog, serverStatusStore } from '@/features/connect-server';
-import { addNode, autoLayout, clearPlan, edgeTypeStore, toggleConnectFromSelected, undo } from '@/features/edit-graph';
+import { addNode, clearPlan, edgeTypeStore, toggleConnectFromSelected, undo } from '@/features/edit-graph';
 import { exportPlan, importPlanFile } from '@/features/plan-transfer';
 import { approveOnServer, loadFromServer, saveToServer } from '@/features/server-sync';
 import { setView, viewStore } from '@/features/switch-view';
@@ -15,8 +15,8 @@ const analyze = async () => {
   await analyzeRepository();
 };
 
-/** Single-row header: title, graph editing tools, layer shortcuts, server status, and menus. */
-export function WorkbenchHeader({ onJumpToLayer }: { onJumpToLayer: (layer: Layer) => void }) {
+/** Single-row header: title, view switch, plan editing tools, server status, and menus. */
+export function WorkbenchHeader() {
   const { plan, history } = useStore(planStore);
   const { connectFromId } = useStore(selectionStore);
   const edgeType = useStore(edgeTypeStore);
@@ -32,7 +32,7 @@ export function WorkbenchHeader({ onJumpToLayer }: { onJumpToLayer: (layer: Laye
         <div>
           <h1>Planning Workbench</h1>
           <div className="brand-meta">
-            계획 v{plan.version} · 노드 {plan.nodes.length} · 관계 {plan.edges.length}
+            계획 v{plan.version} · 모듈 {plan.nodes.length} · 관계 {plan.edges.length}
           </div>
         </div>
       </div>
@@ -57,7 +57,7 @@ export function WorkbenchHeader({ onJumpToLayer }: { onJumpToLayer: (layer: Laye
             ↶ 되돌리기
           </button>
           <button className="btn" onClick={addNode}>
-            ＋ 노드
+            ＋ 모듈
           </button>
           <div className="connect-tool">
             <button
@@ -81,19 +81,6 @@ export function WorkbenchHeader({ onJumpToLayer }: { onJumpToLayer: (layer: Laye
               ))}
             </select>
           </div>
-          <button className="btn" title="FSD 구조에 따라 노드를 다시 배치" onClick={autoLayout}>
-            ▦ 정렬
-          </button>
-        </div>
-      )}
-
-      {editing && (
-        <div className="layer-nav" aria-label="FSD 레이어로 이동">
-          {LAYERS.map((layer) => (
-            <button key={layer} type="button" className="nav-layer" onClick={() => onJumpToLayer(layer)}>
-              {layer}
-            </button>
-          ))}
         </div>
       )}
 

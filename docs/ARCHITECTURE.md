@@ -31,19 +31,20 @@ macOS / Windows / Android            Mac Studio
 
 ## Plan document
 
-A plan holds the modules to build or change and where each is placed. `nodes[]`: id, name, kind (`new` | `modify` | `existing`), path (layer/slice/segment, or layer/segment in app and shared), description (responsibility), behaviors, inputs, outputs, files, x, y. `edges[]`: id, from, to, type. Also `requests[]`, `version`, and an optional `summary`. Before saving, the server checks unique node ids, FSD paths, I/O array types, and edge endpoints.
+A plan holds the modules to build or change and where each is placed. `nodes[]`: id, name, kind (`new` | `modify` | `existing`), path (layer/slice/segment, or layer/segment in app and shared), description (responsibility), behaviors, `interfaces[]` (name, description, inputs, outputs), `serverCalls[]` (method, path, description), files. `edges[]`: id, from, to, type. Also `requests[]`, `version`, and an optional `summary`. Positions are not stored; the client lays the graph out. Before saving, the server checks unique node ids, FSD paths, interface names and array types, and edge endpoints.
 
 ## Planning job: structured answer, static validation
 
 The AI is not trusted to follow instructions about shape or rules.
 
-1. **Schema.** Codex runs as `codex exec --output-schema`, so it can only answer in the shape of `planner::output_schema()`: `summary`, `modules[]` (id, name, kind, layer, slice, segment, responsibility, behaviors, interface.inputs/outputs, files) and `dependencies[]` (from, to). `layer` is an enum of the six FSD layers, so code outside them cannot be expressed.
+1. **Schema.** Codex runs as `codex exec --output-schema`, so it can only answer in the shape of `planner::output_schema()`: `summary`, `modules[]` (id, name, kind, layer, slice, segment, responsibility, behaviors, `interfaces[]` with name/description/inputs/outputs, `serverCalls[]` with method/path/description, files) and `dependencies[]` (from, to). `layer` is an enum of the six FSD layers, so code outside them cannot be expressed.
 2. **Typed parse.** The answer is deserialized into Rust types that reject unknown fields and unknown enum values.
 3. **Static rules** (`planner::validate`), checked against the repository scan and the disk:
    - Every module has an id (unique), a name, a responsibility, and at least one file.
    - Sliced layers need a slice; app and shared must not have one. Slice, segment and file names are clean relative paths.
    - `modify` and `existing` modules are at a placement the scanner found, and every file they name exists there. `new` modules name files that do not exist yet. Only client source file types are accepted.
-   - `new` and `modify` modules state at least one behavior and a non-empty interface.
+   - `new` and `modify` modules state at least one behavior and expose at least one interface. An interface needs a unique name; its inputs and outputs may be empty.
+   - A module that sends requests to the server is placed in `shared/api` or reaches a `shared/api` module through its dependencies. Server call paths start with `/`; the method is one of GET, POST, PUT, PATCH, DELETE.
    - Dependencies refer to modules in the plan, are not duplicated, do not start at an `existing` module, and form no cycle. A dependency points to a lower layer or stays inside one slice.
    - Every `existing` module is depended on by another module.
 4. **Rejection.** Any violation fails the job with the full list (also written to `rejected.json`). Only a proposal with no violations becomes `proposed-plan.json`.
