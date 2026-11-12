@@ -26,9 +26,13 @@ const IGNORED_DIRS: &[&str] = &[
 ];
 /// Segment name used for a slice that keeps its files directly in the slice folder.
 const ROOT_SEGMENT: &str = "index";
+/// FSD cross-import notation: `entities/a/@x/b.ts` is the API that entity a exposes to entity b.
+const CROSS_API_DIR: &str = "@x";
 const MAX_ROOT_DEPTH: usize = 6;
 const MAX_GROUP_DEPTH: usize = 6;
 const MAX_REEXPORT_DEPTH: usize = 10;
+/// How many untraced imports are listed in the analysis result, so the cause can be looked up.
+const MAX_UNRESOLVED_SAMPLES: usize = 50;
 
 fn is_ignored_dir(name: &str) -> bool { name.starts_with('.') || IGNORED_DIRS.contains(&name) }
 fn is_direct_layer(layer: &str) -> bool { layer == "app" || layer == "shared" }
@@ -48,6 +52,20 @@ fn child_dirs(dir: &Path) -> Vec<(String, PathBuf)> {
         .collect();
     dirs.sort();
     dirs
+}
+/// Segments of a slice or direct layer: its sub-folders, plus source files that sit directly in it
+/// (`types.ts` is a segment just like `ui/`). The index file and the `@x` cross-import folder are
+/// public API surface, not segments.
+fn segment_names(dir: &Path) -> Vec<String> {
+    let mut names: BTreeSet<String> = child_dirs(dir).into_iter().map(|(name, _)| name).filter(|name| name != CROSS_API_DIR).collect();
+    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if !path.is_file() || !is_source_file(&path) || is_test_file(&path) { continue; }
+        let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+        // "x.d.ts" has the stem "x.d"; declaration files are not segments.
+        if stem != "index" && !stem.ends_with(".d") { names.insert(stem); }
+    }
+    names.into_iter().collect()
 }
 fn index_file(dir: &Path) -> Option<PathBuf> {
     SOURCE_EXTS.iter().map(|ext| dir.join(format!("index.{ext}"))).find(|p| p.is_file())
@@ -69,7 +87,8 @@ fn normalize(path: &Path) -> PathBuf {
 /// Resolves an extension-less module path to a file: `x.ts`, `x.tsx`, ..., or `x/index.ts`.
 fn resolve_module(path: &Path) -> Option<PathBuf> {
     if path.is_file() { return Some(path.to_path_buf()); }
-    for ext in SOURCE_EXTS {
+    // Declaration files can only be reached through an import, so they are tried here but never scanned.
+    for ext in SOURCE_EXTS.iter().copied().chain(["d.ts"]) {
         let mut with_ext = path.as_os_str().to_owned();
         with_ext.push(format!(".{ext}"));
         let candidate = PathBuf::from(with_ext);
@@ -113,8 +132,9 @@ struct Slice {
 enum Location {
     /// A segment node, identified by its plan path.
     Node(String),
-    /// The slice's public API (its index file); which segment is meant depends on the imported names.
-    SliceRoot(usize),
+    /// A public API of the slice: its index file (None) or an `@x` file. Which segment is meant
+    /// depends on the imported names.
+    Api(usize, Option<PathBuf>),
     Outside,
 }
 
@@ -134,7 +154,7 @@ impl Scan {
             let layer_dir = root.join(layer);
             if !layer_dir.is_dir() { continue; }
             if is_direct_layer(layer) {
-                scan.direct_segments.insert(layer, child_dirs(&layer_dir).into_iter().map(|(name, _)| name).collect());
+                scan.direct_segments.insert(layer, segment_names(&layer_dir));
             } else {
                 for (name, dir) in child_dirs(&layer_dir) { scan.collect_slices(layer, vec![name], &dir); }
             }
@@ -153,7 +173,7 @@ impl Scan {
             || has_direct_source(dir)
             || children.iter().any(|(name, _)| STANDARD_SEGMENTS.contains(&name.as_str()));
         if is_slice {
-            let mut segments: Vec<String> = children.into_iter().map(|(name, _)| name).collect();
+            let mut segments = segment_names(dir);
             if segments.is_empty() { segments.push(ROOT_SEGMENT.to_owned()); }
             self.slices.push(Slice { layer, rel, dir: dir.to_path_buf(), segments });
         } else if rel.len() < MAX_GROUP_DEPTH {
@@ -200,7 +220,8 @@ impl Scan {
             let node = |segment: &str| Location::Node(format!("{layer}/{}/{segment}", slice.rel.join("/")));
             return match parts.get(end).map(String::as_str) {
                 None | Some("index") if slice.segments == [ROOT_SEGMENT] => node(ROOT_SEGMENT),
-                None | Some("index") => Location::SliceRoot(index),
+                None | Some("index") => Location::Api(index, None),
+                Some(CROSS_API_DIR) => Location::Api(index, Some(path.to_path_buf())),
                 Some(first) if slice.segments.iter().any(|s| s == first) => node(first),
                 Some(_) if slice.segments == [ROOT_SEGMENT] => node(ROOT_SEGMENT),
                 Some(_) => Location::Outside,
@@ -240,7 +261,7 @@ impl Patterns {
         Ok(Patterns {
             import_from: re(r#"\bimport\s+(?:type\s+)?([^'";]*?)\s*from\s*["']([^"']+)["']"#)?,
             bare_import: re(r#"\bimport\s*\(\s*["']([^"']+)["']\s*\)|\brequire\s*\(\s*["']([^"']+)["']\s*\)|\bimport\s+["']([^"']+)["']"#)?,
-            export_star: re(r#"\bexport\s+\*\s*(?:as\s+([\w$]+)\s+)?from\s*["']([^"']+)["']"#)?,
+            export_star: re(r#"\bexport\s+(?:type\s+)?\*\s*(?:as\s+([\w$]+)\s+)?from\s*["']([^"']+)["']"#)?,
             export_list: re(r#"\bexport\s+(?:type\s+)?\{([^}]*)\}(?:\s*from\s*["']([^"']+)["'])?"#)?,
             export_decl: re(r"\bexport\s+(?:declare\s+)?(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(?:const|let|var|function\*?|class|interface|type|enum)\s+([\w$]+)")?,
         })
@@ -279,7 +300,8 @@ fn collect_exports(file: &Path, patterns: &Patterns, out: &mut Vec<(String, Path
     let target_of = |spec: &str| spec.starts_with('.').then(|| normalize(&file.parent().unwrap_or(file).join(spec)));
     for cap in patterns.export_star.captures_iter(&text) {
         match (cap.get(1), target_of(&cap[2])) {
-            (Some(namespace), _) => out.push((namespace.as_str().to_owned(), file.to_path_buf())),
+            // `export * as ns from './x'` is provided by x.
+            (Some(namespace), target) => out.push((namespace.as_str().to_owned(), target.unwrap_or_else(|| file.to_path_buf()))),
             (None, Some(target)) => {
                 if let Some(module) = resolve_module(&target) { collect_exports(&module, patterns, out, visited, depth + 1); }
             }
@@ -296,15 +318,21 @@ fn collect_exports(file: &Path, patterns: &Patterns, out: &mut Vec<(String, Path
 }
 
 /// For one slice: which segment provides each name of its public API.
-fn public_api(slice: &Slice, patterns: &Patterns) -> HashMap<String, BTreeSet<String>> {
+fn public_api(slice: &Slice, entry: Option<&Path>, patterns: &Patterns) -> HashMap<String, BTreeSet<String>> {
     let mut table: HashMap<String, BTreeSet<String>> = HashMap::new();
-    let Some(index) = index_file(&slice.dir) else { return table; };
+    let entry_file = match entry {
+        Some(path) => resolve_module(path),
+        None => index_file(&slice.dir),
+    };
+    let Some(index) = entry_file else { return table; };
     let mut exports = vec![];
     collect_exports(&index, patterns, &mut exports, &mut HashSet::new(), 0);
     for (name, provider) in exports {
         let segment = provider.strip_prefix(&slice.dir).ok()
             .and_then(|rel| rel.components().next())
             .map(|c| c.as_os_str().to_string_lossy().to_string())
+            // A file directly in the slice is a segment named after the file.
+            .map(|first| if is_source_file(Path::new(&first)) { Path::new(&first).file_stem().unwrap_or_default().to_string_lossy().to_string() } else { first })
             .filter(|first| slice.segments.contains(first));
         if let Some(segment) = segment { table.entry(name).or_default().insert(segment); }
     }
@@ -329,10 +357,11 @@ pub fn scan(repo: &Path) -> Result<Value, String> {
     }).collect();
 
     let patterns = Patterns::new()?;
-    let mut api_cache: HashMap<usize, HashMap<String, BTreeSet<String>>> = HashMap::new();
+    let mut api_cache: HashMap<(usize, Option<PathBuf>), HashMap<String, BTreeSet<String>>> = HashMap::new();
     let mut edge_keys: HashSet<(String, String)> = HashSet::new();
     let mut edges = vec![];
     let mut unresolved = 0usize;
+    let mut unresolved_samples: Vec<Value> = vec![];
     let walker = WalkDir::new(&root).follow_links(false).max_depth(24).into_iter()
         .filter_entry(|e| e.depth() == 0 || !(e.file_type().is_dir() && is_ignored_dir(&e.file_name().to_string_lossy())));
     for entry in walker.filter_map(Result::ok) {
@@ -357,14 +386,19 @@ pub fn scan(repo: &Path) -> Result<Value, String> {
             let Some(target_path) = scan.resolve_spec(file, &spec) else { continue; };
             let targets: Vec<String> = match scan.locate(&target_path) {
                 Location::Node(path) => vec![path],
-                Location::SliceRoot(index) => {
+                Location::Api(index, entry) => {
                     let slice = &scan.slices[index];
-                    let api = api_cache.entry(index).or_insert_with(|| public_api(slice, &patterns));
+                    let api = api_cache.entry((index, entry.clone())).or_insert_with(|| public_api(slice, entry.as_deref(), &patterns));
                     let segments: BTreeSet<&String> = match &names {
                         Names::All => api.values().flatten().collect(),
                         Names::List(list) => list.iter().filter_map(|name| {
                             let found = api.get(name);
-                            if found.is_none() { unresolved += 1; }
+                            if found.is_none() {
+                                unresolved += 1;
+                                if unresolved_samples.len() < MAX_UNRESOLVED_SAMPLES {
+                                    unresolved_samples.push(json!({"from":source,"import":spec,"name":name}));
+                                }
+                            }
                             found
                         }).flatten().collect(),
                     };
@@ -382,6 +416,6 @@ pub fn scan(repo: &Path) -> Result<Value, String> {
 
     let source_root = root.strip_prefix(repo).unwrap_or(&root).to_string_lossy().replace('\\', "/");
     Ok(json!({"schemaVersion":"0.3","version":1,"nodes":nodes,"edges":edges,"requests":[],"repository":repo.display().to_string(),
-        "analysis":{"kind":"static","sourceRoot":source_root,"slices":scan.slices.len(),"unresolvedImports":unresolved,
+        "analysis":{"kind":"static","sourceRoot":source_root,"slices":scan.slices.len(),"unresolvedImports":unresolved,"unresolvedSamples":unresolved_samples,
             "note":"Directories and resolvable imports are verified. A slice is the first folder below a layer that has an index file; imports of a slice's public API are traced through its re-exports. No AI-derived I/O contracts."}}))
 }
