@@ -29,17 +29,32 @@ macOS / Windows / Android            Mac Studio
 | POST | `/api/jobs` | `{ instruction, currentPlan }` -> `{ id,status }` |
 | GET | `/api/jobs/{id}` | `{ job, proposedPlan }` (`proposedPlan` on success) |
 
-## Output contract
+## Plan document
 
-`Plan` is the existing Planning Workbench schema v0.3: `nodes[]` (id/path/description/inputs/outputs/x/y), `edges[]` (id/from/to/type), `requests[]`, `version`. The server verifies all edge endpoints, unique node IDs, FSD paths, and I/O array types before saving or accepting AI output.
+A plan holds the modules to build or change and where each is placed. `nodes[]`: id, name, kind (`new` | `modify` | `existing`), path (layer/slice/segment, or layer/segment in app and shared), description (responsibility), behaviors, inputs, outputs, files, x, y. `edges[]`: id, from, to, type. Also `requests[]`, `version`, and an optional `summary`. Before saving, the server checks unique node ids, FSD paths, I/O array types, and edge endpoints.
 
-The current UI arranges modules horizontally inside always-visible `app / pages / widgets / features / entities / shared` lanes. `app` and `shared` have direct segments; all other layers have `slice / segment` levels.
+## Planning job: structured answer, static validation
+
+The AI is not trusted to follow instructions about shape or rules.
+
+1. **Schema.** Codex runs as `codex exec --output-schema`, so it can only answer in the shape of `planner::output_schema()`: `summary`, `modules[]` (id, name, kind, layer, slice, segment, responsibility, behaviors, interface.inputs/outputs, files) and `dependencies[]` (from, to). `layer` is an enum of the six FSD layers, so code outside them cannot be expressed.
+2. **Typed parse.** The answer is deserialized into Rust types that reject unknown fields and unknown enum values.
+3. **Static rules** (`planner::validate`), checked against the repository scan and the disk:
+   - Every module has an id (unique), a name, a responsibility, and at least one file.
+   - Sliced layers need a slice; app and shared must not have one. Slice, segment and file names are clean relative paths.
+   - `modify` and `existing` modules are at a placement the scanner found, and every file they name exists there. `new` modules name files that do not exist yet. Only client source file types are accepted.
+   - `new` and `modify` modules state at least one behavior and a non-empty interface.
+   - Dependencies refer to modules in the plan, are not duplicated, do not start at an `existing` module, and form no cycle. A dependency points to a lower layer or stays inside one slice.
+   - Every `existing` module is depended on by another module.
+4. **Rejection.** Any violation fails the job with the full list (also written to `rejected.json`). Only a proposal with no violations becomes `proposed-plan.json`.
+
+Each job keeps its files in `data/jobs/<uuid>/`: `prompt.txt`, `schema.json`, `result.json` (raw answer), `exit.json`, and `proposed-plan.json` or `rejected.json`.
 
 ## Trust boundary
 
 - Rust verifies machine-readable graph contracts. AI generates **proposals**, never direct writes to a persisted approved Plan.
 - Herdr executes exclusively on Mac Studio (even when users operate the Android or Windows app).
-- Each AI job has its own **detached Git worktree**, plus durable logs and proposal artifacts in `data/jobs/<uuid>/`. Keep this directory out of production Git tracking.
+- Each AI job runs Codex with a **read-only sandbox** in the repository, started inside a Herdr workspace by `factory-server run-codex <job-dir>`. Job artifacts are kept in `data/jobs/<uuid>/`; keep this directory out of Git tracking.
 - Mac Studio listens on loopback; Tailscale Serve adds tailnet-scoped HTTPS. Every API route requires a separate bearer token. Do not use Funnel.
 - The source browser graph can still be edited offline; the two transport paths are deliberately separated.
 

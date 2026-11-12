@@ -30,4 +30,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build -p factory-server --locked
+      # Includes the tests of the proposal validator.
+      - run: cargo test -p factory-server --locked

@@ -87,15 +87,21 @@ The server binds only to loopback by default, requires a bearer token for every 
 
 ## C. Using Planning
 
-1. `서버 ▾ → 저장소 분석` — the server reads the real FSD layout and resolvable imports, and the **저장소** view shows them as a read-only overview at slice level. Select a slice to see what it uses and what uses it, and press `계획에 추가` to bring its segments into the plan. Static analysis does not invent I/O contracts, and it never changes the plan by itself.
-2. In the **계획** view, edit the graph, input/output contracts, and dependencies directly on the canvas.
-3. Write a requirement in the command box and choose `✦ Herdr 계획 요청`. The server creates a detached Git worktree at `data/jobs/<id>/worktree`, starts Herdr/Codex, and asks it to create `.factory/proposed-plan.json`.
-4. Wait for a completed job. The UI polls for status and shows `제안 그래프 적용`. **No AI output automatically overwrites your graph**. You must explicitly accept it.
-5. `서버 저장` → `계획 승인` creates an immutable timestamped snapshot under `data/approved/`.
+The app has two views, switched in the header.
 
-The Herdr pane is retained for inspection. If the agent is blocked, the job may fail or time out; use Herdr TUI to inspect the pane and address the prompt. A failed/missing JSON output is not treated as successful execution.
+**저장소 (repository)** is a read-only overview of what exists. `서버 ▾ → 저장소 분석` makes the server read the real FSD layout and the imports it can resolve, and shows them at slice level. Select a slice to see what it uses and what uses it. Nothing can be edited here, and analysis never changes the plan.
 
-**Important**: The AI job runs from `HEAD` in a detached worktree; uncommitted changes in the original repository are not copied. The static scanner reads the working tree. This difference is intentional and documented. `data/jobs/*/worktree` is not automatically removed. Inspect and clean up old worktrees with `git worktree list` / `git worktree remove` after jobs are no longer needed.
+**계획 (plan)** is where work is designed. A plan starts empty: it holds the modules to build or change, and where each one is placed.
+
+1. Write what you want built in the request box and press `✦ 계획 요청`. The server runs Codex in a Herdr workspace, read-only, and asks for the modules: responsibility, behaviors, interface, placement (layer / slice / segment), files, and dependencies.
+2. The answer is constrained to a JSON Schema and then checked by the server against fixed rules and against the repository (see `docs/ARCHITECTURE.md`). **A proposal that breaks any rule is rejected as a whole**, and the job reports every violation. Nothing is repaired or guessed.
+3. A proposal that passes shows `제안 그래프 적용`. **No AI output changes your plan by itself**; you accept it explicitly, and you can undo it.
+4. Edit modules on the canvas: click to edit, drag sideways to arrange, drag into another layer to change the placement. `＋ 노드` adds a module by hand.
+5. `서버 ▾ → 서버에 저장` then `계획 승인` creates an immutable timestamped snapshot under `data/approved/`.
+
+A request is addressed to the selected module or to the whole plan; the target is shown next to the request box.
+
+Codex runs with a read-only sandbox in the repository's working tree, so it sees uncommitted changes and cannot modify files. Only client code inside the FSD layers can be planned; the answer schema has no way to express other code. The Herdr workspace of each job is kept for inspection.
 
 ## D. Windows client
 
@@ -155,8 +161,8 @@ To build from source on Mac Studio instead, use `./scripts/macos/install-server-
 - No verified production build / code signing in this delivery environment.
 - One selected repository per server instance; not a general project registry yet.
 - The static scanner works on text patterns, not a TypeScript AST. It finds the FSD source root inside the repository (set `FACTORY_SOURCE_ROOT`, relative to the repository, to choose it yourself), treats the first folder below a layer that has an index file as the slice, and resolves relative imports, `@/`, and layer aliases such as `@features/...`. Imports of a slice's public API are traced through its index re-exports to a segment; names it cannot trace are counted in `analysis.unresolvedImports` and produce no edge. Other `tsconfig` aliases, package exports, and type resolution are not handled.
-- Planning's AI contract is JSON + schema validation, not a guarantee of architectural quality. Current AI revisions replace the entire graph *only after human approval*, not yet a minimal patch/diff merge.
-- Herdr job status is persisted, but ongoing processes are **not automatically resumed after a Factory server restart**; interrupted jobs should be inspected in Herdr.
-- No rich multiuser edit conflict management, automatic worktree cleanup, push/PR integration, or delivery stage yet.
+- Validation guarantees the shape of a proposal and its consistency with the repository, not its architectural quality. An accepted proposal replaces the whole plan *only after human approval*; there is no minimal patch/diff merge yet. A rejected proposal is not retried automatically.
+- Job status is persisted, but running jobs are **not resumed after a Factory server restart**; inspect interrupted jobs in Herdr. Old Herdr workspaces are not closed automatically.
+- No rich multiuser edit conflict management, push/PR integration, or delivery stage yet.
 
 See `docs/ARCHITECTURE.md` for the stage contract and API endpoints.

@@ -1,4 +1,5 @@
 mod graph;
+mod planner;
 
 use std::{collections::{HashMap, HashSet}, env, path::{Path, PathBuf}, sync::Arc, time::{SystemTime, UNIX_EPOCH, Duration}};
 use axum::{
@@ -145,62 +146,131 @@ async fn cli(s:&AppState,args:&[&str],max_wait:Duration)->Result<String,String> 
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
+/// The task for the agent. It describes what to plan and gives it the facts it needs. The shape of
+/// the answer is not requested here: it is enforced by the output schema, and the rules are
+/// enforced by `planner::validate`, which rejects the answer if any of them is broken.
+fn planning_prompt(repo:&str,source_root:&str,instruction:&str,current_plan:&Value,existing_paths:&[String])->String {
+    format!(r#"Plan work for a codebase that follows Feature-Sliced Design. Do not change any file.
+
+Repository: {repo}
+FSD source root (relative to the repository): {source_root}
+
+Request: {instruction}
+
+Read the code the request touches. Then answer with the modules to build or change: what each one is responsible for, what it does, its interface, where it is placed (layer, slice, segment), and which modules it imports from. A module is a unit with one responsibility that a developer can implement and review on its own. Write names and descriptions in the language of the request.
+
+Your answer is checked by a program and rejected as a whole if any of these is not true:
+- Every module has a name, a responsibility, and a placement in one of the six FSD layers. pages, widgets, features and entities need a slice; app and shared have none.
+- A module marked "modify" or "existing" is at a placement that exists in the repository (list below), and every file it names exists there. "existing" modules are included only when another module in the plan imports from them.
+- Every module names its files. A "new" module names files that do not exist yet. Only client source files (ts, tsx, js, jsx, css, scss, json) can be planned; code outside the FSD layers is not part of a plan.
+- Every "new" or "modify" module states at least one behavior and a non-empty interface.
+- A dependency points to a lower layer, or stays inside one slice. There are no cycles, no duplicates, and no dependencies that start at an "existing" module.
+
+The plan so far (keep these modules unless the request requires changing them):
+{current_plan}
+
+Module placements that exist in the repository:
+{}"#,existing_paths.join("\n"))
+}
+
+/// Runs the agent in the Herdr pane so its progress can be watched, by starting this same binary
+/// as `factory-server run-codex <job-dir>`. Going through our own binary keeps the command line
+/// free of quoting, which differs between the shells a pane may run.
+async fn run_agent_in_pane(s:&AppState,dir:&Path,pane:&str)->Result<(),String> {
+    let exe=env::current_exe().map_err(|e|format!("Cannot locate the server binary: {e}"))?;
+    let (exe,job_dir)=(exe.to_string_lossy().to_string(),dir.to_string_lossy().to_string());
+    if exe.contains(char::is_whitespace) || job_dir.contains(char::is_whitespace) {
+        return Err(format!("Paths with spaces cannot be passed to the Herdr pane: {exe} / {job_dir}"));
+    }
+    cli(s,&["pane","run",pane,&exe,"run-codex",&job_dir],Duration::from_secs(35)).await?;
+    Ok(())
+}
+
+/// Entry point of `factory-server run-codex <job-dir>`. Runs `codex exec` with the job's prompt on
+/// stdin, constrained to the job's output schema and to a read-only sandbox, and records the exit
+/// code in exit.json for the server to pick up.
+fn run_codex(job_dir:&Path)->i32 {
+    let run=|| -> Result<i32,String> {
+        let settings:Value=serde_json::from_slice(&std::fs::read(job_dir.join("run.json")).map_err(|e|format!("run.json: {e}"))?).map_err(|e|format!("run.json: {e}"))?;
+        let cwd=settings.get("cwd").and_then(Value::as_str).ok_or("run.json has no cwd")?;
+        let codex=env::var("CODEX_BIN").unwrap_or_else(|_|"codex".into());
+        let prompt=std::fs::File::open(job_dir.join("prompt.txt")).map_err(|e|format!("prompt.txt: {e}"))?;
+        // On Windows codex is a .cmd shim, which only the command interpreter can start.
+        let mut command=if cfg!(windows) {let mut c=std::process::Command::new("cmd");c.args(["/C",&codex]);c} else {std::process::Command::new(&codex)};
+        let status=command.arg("exec")
+            .args(["--sandbox","read-only","--ephemeral","--skip-git-repo-check","-c","check_for_update_on_startup=false","-C",cwd])
+            .arg("--output-schema").arg(job_dir.join("schema.json"))
+            .arg("--output-last-message").arg(job_dir.join("result.json"))
+            .arg("-")
+            .stdin(prompt)
+            .status().map_err(|e|format!("Cannot start {codex}: {e}"))?;
+        Ok(status.code().unwrap_or(-1))
+    };
+    let (code,error)=match run() {Ok(code)=>(code,None),Err(e)=>{eprintln!("{e}");(-1,Some(e))}};
+    let _=std::fs::write(job_dir.join("exit.json"),json!({"code":code,"error":error}).to_string());
+    code
+}
+
+const AGENT_TIMEOUT:Duration=Duration::from_secs(900);
+
 async fn execute_job(s:Arc<AppState>,id:String,instruction:String) {
-    let agent=format!("factory_{}",&id[..12]);
     let dir=s.data_dir.join("jobs").join(&id);
-    let output=dir.join("proposed-plan.json");
-    let source_repo=s.repository.to_string_lossy().to_string();
-    // A detached worktree ensures the agent cannot modify the active checkout.
-    let worktree=dir.join("worktree");
-    let repo=worktree.to_string_lossy().to_string();
-    let input=worktree.join(".factory/input-plan.json");
-    let generated=worktree.join(".factory/proposed-plan.json");
-    let dir_name=format!("factory-{}",&id[..8]);
-    let result:Result<(String,String),String>=async {
-        update_job(&s,&id,"running","격리된 Git worktree 생성 중".into(),None,None).await;
-        let outcome=Command::new("git").args(["-C",&source_repo,"worktree","add","--detach",&repo,"HEAD"])
-            .output().await.map_err(|e|format!("git worktree failed: {e}"))?;
-        if !outcome.status.success() {return Err(format!("git worktree failed: {}",String::from_utf8_lossy(&outcome.stderr)));}
-        fs::create_dir_all(worktree.join(".factory")).await.map_err(|e|e.to_string())?;
-        fs::copy(dir.join("input-plan.json"),&input).await.map_err(|e|e.to_string())?;
+    let label=format!("factory-{}",&id[..8]);
+    let result:Result<Value,String>=async {
+        // 1. Facts from the repository: where the FSD layers are and which modules exist.
+        update_job(&s,&id,"running","저장소 구조 확인 중".into(),None,None).await;
+        let repo=s.repository.clone();
+        let scan=tokio::task::spawn_blocking(move||graph::scan(&repo)).await.map_err(|e|e.to_string())??;
+        let existing:Vec<String>=scan.get("nodes").and_then(Value::as_array).into_iter().flatten()
+            .filter_map(|n|n.get("path").and_then(Value::as_str).map(str::to_owned)).collect();
+        let source_root=scan.pointer("/analysis/sourceRoot").and_then(Value::as_str).unwrap_or("").to_owned();
+        let input=read_json(&dir.join("input-plan.json")).await.map_err(|e|e.1)?;
+        let current_plan=input.get("plan").cloned().unwrap_or(Value::Null);
+
+        // 2. The job files: task, answer schema, and where the agent runs.
+        let prompt=planning_prompt(&s.repository.to_string_lossy(),&source_root,&instruction,&current_plan,&existing);
+        fs::write(dir.join("prompt.txt"),prompt).await.map_err(|e|e.to_string())?;
+        write_json(&dir.join("schema.json"),&planner::output_schema()).await.map_err(|e|e.1)?;
+        write_json(&dir.join("run.json"),&json!({"cwd":s.repository})).await.map_err(|e|e.1)?;
+
+        // 3. Run the agent in a Herdr pane and wait for it to finish.
         update_job(&s,&id,"running","Herdr workspace 생성 중".into(),None,None).await;
-        let result=cli(&s,&["workspace","create","--cwd",&repo,"--label",&dir_name,"--no-focus"],Duration::from_secs(35)).await?;
-        let data:Value=serde_json::from_str(&result).map_err(|e|format!("Workspace JSON decode failed: {e}: {result}"))?;
-        let pane=data.pointer("/result/root_pane/pane_id").and_then(Value::as_str).ok_or_else(||format!("Herdr root pane id missing: {result}"))?.to_owned();
-        update_job(&s,&id,"running","Codex agent 시작 중".into(),Some(agent.clone()),Some(pane.clone())).await;
-        // Codex stops at interactive startup screens unless told otherwise, and Herdr then reports the
-        // agent as blocked. The job runs unattended in a worktree this server just created, so:
-        // trust that folder, skip the update notice, and let Codex write inside it without asking.
-        let trust=format!("projects.\"{repo}\".trust_level=\"trusted\"");
-        let start=["agent","start",&agent,"--kind","codex","--pane",&pane,"--",
-            "-c",&trust,"-c","check_for_update_on_startup=false",
-            "--sandbox","workspace-write","--ask-for-approval","never"];
+        let created=cli(&s,&["workspace","create","--cwd",&s.repository.to_string_lossy(),"--label",&label,"--no-focus"],Duration::from_secs(35)).await?;
+        let data:Value=serde_json::from_str(&created).map_err(|e|format!("Workspace JSON decode failed: {e}: {created}"))?;
+        let pane=data.pointer("/result/root_pane/pane_id").and_then(Value::as_str).ok_or_else(||format!("Herdr root pane id missing: {created}"))?.to_owned();
         // A new pane needs a moment before its shell accepts a command.
-        let mut attempt=0;
-        loop {
-            match cli(&s,&start,Duration::from_secs(65)).await {
-                Ok(_)=>break,
-                Err(e) if e.contains("agent_pane_busy") && attempt<10 => {attempt+=1;tokio::time::sleep(Duration::from_secs(1)).await;}
-                Err(e)=>return Err(e),
-            }
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        run_agent_in_pane(&s,&dir,&pane).await?;
+        update_job(&s,&id,"running",format!("Codex가 계획을 만드는 중 (Herdr {label})"),Some("codex".into()),Some(pane)).await;
+        let exit_file=dir.join("exit.json");
+        let started=std::time::Instant::now();
+        while !exit_file.is_file() {
+            if started.elapsed()>AGENT_TIMEOUT {return Err(format!("Codex did not finish within {} minutes.",AGENT_TIMEOUT.as_secs()/60));}
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
-        let prompt=format!("You are the planning stage of a software factory. Work only in planning mode; do not modify production repository files. Inspect the repo at {repo}. Read the user's input in {} (JSON with current plan and instruction). User instruction: {}. Output a complete proposed Planning Workbench graph in JSON at {}. Required schema: {{\"schemaVersion\":\"0.3\",\"version\":1,\"nodes\":[{{\"id\":\"...\",\"path\":\"features/example/model\",\"description\":\"...\",\"inputs\":[\"...\"],\"outputs\":[\"...\"],\"x\":210,\"y\":150}}],\"edges\":[{{\"id\":\"...\",\"from\":\"node-id\",\"to\":\"node-id\",\"type\":\"imports\"}}],\"requests\":[]}}. Use FSD layers app/pages/widgets/features/entities/shared and actual segments. App/shared have two-part paths, others three-part paths. Keep existing user design changes where possible. Produce a COMPLETE JSON, no markdown. If uncertain label inferred details in description. Final response should mention the output path only.",input.display(),instruction,generated.display());
-        update_job(&s,&id,"running","Codex에서 계획 생성 중".into(),Some(agent.clone()),Some(pane.clone())).await;
-        cli(&s,&["agent","prompt",&agent,&prompt,"--wait","--timeout","600000"],Duration::from_secs(630)).await?;
-        fs::copy(&generated,&output).await.map_err(|e|format!("No plan JSON was written inside the worktree: {e}"))?;
-        Ok((agent,pane))
+        let exit=read_json(&exit_file).await.map_err(|e|e.1)?;
+        if exit.get("code").and_then(Value::as_i64)!=Some(0) {
+            return Err(format!("Codex exited with an error: {}. See the Herdr workspace {label}.",exit.get("error").and_then(Value::as_str).unwrap_or("non-zero exit code")));
+        }
+
+        // 4. The answer must parse into the typed proposal and pass every static check.
+        update_job(&s,&id,"running","제안 검증 중".into(),None,None).await;
+        let answer=fs::read_to_string(dir.join("result.json")).await.map_err(|e|format!("Codex produced no answer: {e}"))?;
+        let proposal:planner::Proposal=serde_json::from_str(&answer).map_err(|e|format!("제안이 정해진 구조가 아니어서 거절했습니다: {e}"))?;
+        let paths:HashSet<String>=existing.iter().cloned().collect();
+        let root=s.repository.join(&source_root);
+        let errors=planner::validate(&proposal,&planner::Disk{paths:&paths,file_exists:&|file|root.join(file).is_file()});
+        if !errors.is_empty() {
+            let _=write_json(&dir.join("rejected.json"),&json!({"errors":errors})).await;
+            return Err(format!("제안이 검증을 통과하지 못해 거절했습니다 ({}건):\n- {}",errors.len(),errors.join("\n- ")));
+        }
+        Ok(planner::to_plan(&proposal))
     }.await;
     match result {
-        Ok((agent,pane)) => {
-            let parsed=read_json(&output).await.map_err(|e|e.1);
-            match parsed {
-                Ok(plan) => match validate_plan(&plan) {
-                    Ok(()) => update_job(&s,&id,"completed","계획 제안 준비됨. UI에서 확인 후 적용하세요.".into(),Some(agent),Some(pane)).await,
-                    Err(e) => update_job(&s,&id,"failed",format!("AI JSON validation failed: {}",e.1),Some(agent),Some(pane)).await,
-                },
-                Err(e) => update_job(&s,&id,"failed",format!("AI did not produce a valid plan file: {e}"),Some(agent),Some(pane)).await,
-            }
-        }
+        Ok(plan) => match write_json(&dir.join("proposed-plan.json"),&plan).await {
+            Ok(()) => update_job(&s,&id,"completed","계획 제안이 검증을 통과했습니다. 확인 후 적용하세요.".into(),None,None).await,
+            Err(e) => update_job(&s,&id,"failed",e.1,None,None).await,
+        },
         Err(error) => update_job(&s,&id,"failed",error,None,None).await,
     }
 }
@@ -210,7 +280,7 @@ async fn start_job(State(s):State<Arc<AppState>>,headers:HeaderMap,Json(input):J
     let instruction=input.instruction.trim();
     if instruction.is_empty() || instruction.chars().count()>3000 {return Err(err(StatusCode::BAD_REQUEST,"Instruction must be 1..3000 chars"));}
     let id=Uuid::new_v4().simple().to_string();
-    let job=Job{id:id.clone(),status:"queued".into(),message:"Herdr 작업 대기".into(),agent:None,pane_id:None,created_at_unix_ms:now_ms()};
+    let job=Job{id:id.clone(),status:"queued".into(),message:"계획 작업 대기".into(),agent:None,pane_id:None,created_at_unix_ms:now_ms()};
     let dir=s.data_dir.join("jobs").join(&id);
     fs::create_dir_all(&dir).await.map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,e))?;
     write_json(&dir.join("input-plan.json"),&json!({"instruction":instruction,"plan":input.current_plan})).await?;
@@ -244,6 +314,12 @@ async fn job_status(State(s):State<Arc<AppState>>,headers:HeaderMap,RoutePath(id
 
 #[tokio::main]
 async fn main()->Result<(),Box<dyn std::error::Error>> {
+    // `factory-server run-codex <job-dir>` runs the agent for one job; see run_agent_in_pane.
+    let args:Vec<String>=env::args().collect();
+    if args.get(1).map(String::as_str)==Some("run-codex") {
+        let job_dir=args.get(2).ok_or("Usage: factory-server run-codex <job-dir>")?;
+        std::process::exit(run_codex(Path::new(job_dir)));
+    }
     let token=env::var("FACTORY_API_TOKEN").map_err(|_|"Set FACTORY_API_TOKEN (a long random secret)")?;
     if token.len()<24 {return Err("FACTORY_API_TOKEN must be at least 24 characters".into());}
     let repo=std::path::absolute(env::var("FACTORY_REPO_PATH").map_err(|_|"Set FACTORY_REPO_PATH")?)?;
