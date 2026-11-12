@@ -1,14 +1,15 @@
 // Validation of plans and of the relations inside them.
 import { isDirectLayer, isLayer, layerIndex, layerOf, sliceOf } from './path';
 import {
+  INTERFACE_KINDS,
   MODULE_KINDS,
+  type InterfaceKind,
   type ModuleInterface,
   type ModuleKind,
   type Plan,
   type PlanEdge,
   type PlanNode,
   type PlanRequest,
-  type ServerCall,
 } from './types';
 
 /** An "imports" edge may only point to a lower layer, or stay within one slice (or within app/shared). */
@@ -27,33 +28,36 @@ export function isInvalidEdge(edge: PlanEdge, nodes: PlanNode[]): boolean {
 
 type Loose = Record<string, unknown>;
 
+const stringArray = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : []);
+
+const interfaceKind = (value: unknown): InterfaceKind =>
+  INTERFACE_KINDS.includes(value as InterfaceKind) ? (value as InterfaceKind) : 'function';
+
 function interfacesOf(n: Loose, fallbackName: string): ModuleInterface[] {
-  if (Array.isArray(n.interfaces)) {
-    return (n.interfaces as Loose[])
-      .filter((item) => typeof item?.name === 'string' && item.name.trim())
-      .map((item) => ({
-        name: String(item.name).trim(),
-        description: String(item.description ?? ''),
-        inputs: stringArray(item.inputs),
-        outputs: stringArray(item.outputs),
-      }));
-  }
+  const interfaces: ModuleInterface[] = Array.isArray(n.interfaces)
+    ? (n.interfaces as Loose[])
+        .filter((item) => typeof item?.name === 'string' && item.name.trim())
+        .map((item) => ({
+          name: String(item.name).trim(),
+          kind: interfaceKind(item.kind),
+          inputs: stringArray(item.inputs),
+          outputs: stringArray(item.outputs),
+        }))
+    : [];
   // Plans made before interfaces existed kept one list of inputs and outputs on the module.
   const [inputs, outputs] = [stringArray(n.inputs), stringArray(n.outputs)];
-  return inputs.length + outputs.length > 0 ? [{ name: fallbackName, description: '', inputs, outputs }] : [];
+  if (!Array.isArray(n.interfaces) && inputs.length + outputs.length > 0) {
+    interfaces.push({ name: fallbackName, kind: 'function', inputs, outputs });
+  }
+  // An earlier shape listed server requests separately; they are interfaces like the rest.
+  for (const call of Array.isArray(n.serverCalls) ? (n.serverCalls as Loose[]) : []) {
+    if (typeof call?.path !== 'string' || !call.path.trim()) continue;
+    const name = `${String(call.method ?? 'GET').toUpperCase()} ${call.path.trim()}`;
+    if (!interfaces.some((item) => item.name === name))
+      interfaces.push({ name, kind: 'server', inputs: [], outputs: [] });
+  }
+  return interfaces;
 }
-
-function serverCallsOf(n: Loose): ServerCall[] {
-  if (!Array.isArray(n.serverCalls)) return [];
-  return (n.serverCalls as Loose[])
-    .filter((call) => typeof call?.path === 'string' && call.path.trim())
-    .map((call) => ({
-      method: String(call.method ?? 'GET').toUpperCase(),
-      path: String(call.path).trim(),
-      description: String(call.description ?? ''),
-    }));
-}
-const stringArray = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : []);
 
 /** Validates and normalizes a plan from a file, the server, or an AI proposal. Throws on unusable input. */
 export function normalizeImported(data: unknown): Plan {
@@ -86,7 +90,6 @@ export function normalizeImported(data: unknown): Plan {
         n,
         typeof n.name === 'string' && n.name.trim() ? n.name.trim() : (parts.at(-1) ?? 'module'),
       ),
-      serverCalls: serverCallsOf(n),
     };
   });
   const known = new Set(nodes.map((n) => n.id));

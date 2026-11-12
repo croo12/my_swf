@@ -7,7 +7,6 @@ import {
   type Layer,
   type ModuleInterface,
   type ModuleKind,
-  type ServerCall,
   closeEditor,
   layerOf,
   mutatePlan,
@@ -29,7 +28,6 @@ export interface NodeDraft {
   behaviors: string[];
   files: string[];
   interfaces: ModuleInterface[];
-  serverCalls: ServerCall[];
 }
 
 /** Relation type used for the next connection, chosen in the toolbar. */
@@ -83,7 +81,6 @@ export function addNode(): void {
     path: 'features/new-feature/model',
     description: '',
     interfaces: [],
-    serverCalls: [],
   };
   mutatePlan('새 모듈을 추가했습니다. 이름과 배치 위치를 정하세요.', (p) => ({ ...p, nodes: [...p.nodes, node] }));
   openEditor(id);

@@ -93,7 +93,7 @@ The app has two views, switched in the header.
 
 **계획 (plan)** is where work is designed. A plan starts empty: it holds the modules to build or change, and where each one is placed.
 
-1. Write what you want built in the request box and press `✦ 계획 요청`. The server runs Codex in a Herdr workspace, read-only, and asks for the modules: responsibility, behaviors, the interfaces each module exposes (each with its own inputs and outputs, where it has any), the requests it sends to the server, placement (layer / slice / segment), files, and dependencies.
+1. Write what you want built in the request box and press `✦ 계획 요청`. The server runs Codex in a Herdr workspace, read-only, and asks for the modules: responsibility, behaviors, its interfaces (what it offers to other modules and the requests it sends to the server, each with a kind and with inputs and outputs where it has any), placement (layer / slice / segment), files, and dependencies.
 2. The answer is constrained to a JSON Schema and then checked by the server against fixed rules and against the repository (see `docs/ARCHITECTURE.md`). **A proposal that breaks any rule is rejected as a whole**, and the job reports every violation. Nothing is repaired or guessed.
 3. A proposal that passes shows `제안 그래프 적용`. **No AI output changes your plan by itself**; you accept it explicitly, and you can undo it.
 4. Edit modules on the canvas: click to edit, drag into another layer to change the placement. `＋ 모듈` adds a module by hand. The graph is laid out automatically (ELK): only the layers the plan touches are shown, relations are drawn as orthogonal lines, and selecting a module highlights its relations. Requests to the server appear as a server box below the layers, reached from the `shared/api` modules.

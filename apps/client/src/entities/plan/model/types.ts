@@ -7,21 +7,40 @@ export const MODULE_KINDS: readonly ModuleKind[] = ['new', 'modify', 'existing']
 
 export const MODULE_KIND_LABELS: Record<ModuleKind, string> = { new: '신규', modify: '수정', existing: '기존' };
 
-/** Something a module exposes to other modules: a component, hook, function, store, type or constant. */
+/**
+ * What an interface is. The first six are offered to other modules; `server` is a request the
+ * module sends to the server.
+ */
+export type InterfaceKind = 'component' | 'hook' | 'function' | 'store' | 'constant' | 'type' | 'server';
+
+export const INTERFACE_KINDS: readonly InterfaceKind[] = [
+  'component',
+  'hook',
+  'function',
+  'store',
+  'constant',
+  'type',
+  'server',
+];
+
+export const INTERFACE_KIND_LABELS: Record<InterfaceKind, string> = {
+  component: '컴포넌트',
+  hook: '훅',
+  function: '함수',
+  store: '스토어',
+  constant: '상수',
+  type: '타입',
+  server: '서버 요청',
+};
+
+/** One point where a module meets the outside. A server request is named "METHOD /path". */
 export interface ModuleInterface {
   name: string;
-  description: string;
-  /** Props or arguments. Empty when it takes none. */
+  kind: InterfaceKind;
+  /** Props, arguments or request data. Empty when there are none. */
   inputs: string[];
-  /** What it returns, renders or emits. Empty when it gives nothing back. */
+  /** Return value, rendered UI or response. Empty when there is none. */
   outputs: string[];
-}
-
-/** A request a module sends to the server. The server side is outside the plan. */
-export interface ServerCall {
-  method: string;
-  path: string;
-  description: string;
 }
 
 /**
@@ -40,10 +59,8 @@ export interface PlanNode {
   behaviors?: string[];
   /** Files the module consists of, relative to its placement. */
   files?: string[];
-  /** What the module exposes to other modules. */
+  /** What the module offers to other modules, and the requests it sends to the server. */
   interfaces: ModuleInterface[];
-  /** Requests to the server that originate in this module. */
-  serverCalls: ServerCall[];
 }
 
 export interface PlanEdge {

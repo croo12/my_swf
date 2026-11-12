@@ -1,5 +1,7 @@
 import { Fragment, useState } from 'react';
 import {
+  INTERFACE_KINDS,
+  INTERFACE_KIND_LABELS,
   MODULE_KINDS,
   MODULE_KIND_LABELS,
   cleanPath,
@@ -9,14 +11,13 @@ import {
   moduleNameOf,
   planStore,
   selectionStore,
+  type InterfaceKind,
   type ModuleKind,
   type PlanEdge,
   type PlanNode,
 } from '@/entities/plan';
 import { useStore } from '@/shared/lib';
 import { deleteNode, removeEdge, saveNode } from '../model/actions';
-
-const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
 const lines = (text: string) =>
   text
@@ -28,15 +29,9 @@ const lines = (text: string) =>
 interface InterfaceRow {
   key: number;
   name: string;
-  description: string;
+  kind: InterfaceKind;
   inputs: string;
   outputs: string;
-}
-interface CallRow {
-  key: number;
-  method: string;
-  path: string;
-  description: string;
 }
 
 /** Side panel for editing the selected module. Renders nothing while no editor is open. */
@@ -60,13 +55,12 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
     node.interfaces.map((item, key) => ({
       key,
       name: item.name,
-      description: item.description,
+      kind: item.kind,
       inputs: item.inputs.join('\n'),
       outputs: item.outputs.join('\n'),
     })),
   );
-  const [calls, setCalls] = useState<CallRow[]>(() => node.serverCalls.map((call, key) => ({ key, ...call })));
-  const [nextKey, setNextKey] = useState(node.interfaces.length + node.serverCalls.length);
+  const [nextKey, setNextKey] = useState(node.interfaces.length);
   const [invalid, setInvalid] = useState(false);
 
   const pathParts = cleanPath(path).split('/').filter(Boolean);
@@ -75,14 +69,8 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
 
   const patchInterface = (key: number, change: Partial<InterfaceRow>) =>
     setInterfaces((rows) => rows.map((row) => (row.key === key ? { ...row, ...change } : row)));
-  const patchCall = (key: number, change: Partial<CallRow>) =>
-    setCalls((rows) => rows.map((row) => (row.key === key ? { ...row, ...change } : row)));
   const addInterface = () => {
-    setInterfaces((rows) => [...rows, { key: nextKey, name: '', description: '', inputs: '', outputs: '' }]);
-    setNextKey(nextKey + 1);
-  };
-  const addCall = () => {
-    setCalls((rows) => [...rows, { key: nextKey, method: 'GET', path: '/', description: '' }]);
+    setInterfaces((rows) => [...rows, { key: nextKey, name: '', kind: 'function', inputs: '', outputs: '' }]);
     setNextKey(nextKey + 1);
   };
 
@@ -103,13 +91,10 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
         .filter((row) => row.name.trim())
         .map((row) => ({
           name: row.name.trim(),
-          description: row.description.trim(),
+          kind: row.kind,
           inputs: lines(row.inputs),
           outputs: lines(row.outputs),
         })),
-      serverCalls: calls
-        .filter((row) => row.path.trim())
-        .map((row) => ({ method: row.method, path: row.path.trim(), description: row.description.trim() })),
     });
   };
 
@@ -179,15 +164,27 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
         </div>
 
         <div className="field">
-          <label>인터페이스 · 모듈 바깥으로 노출하는 것</label>
-          {interfaces.length === 0 && <div className="help">노출하는 인터페이스 없음</div>}
+          <label>인터페이스 · 다른 모듈에 제공하는 것과 서버로 보내는 요청</label>
+          {interfaces.length === 0 && <div className="help">인터페이스 없음</div>}
           {interfaces.map((row) => (
             <div key={row.key} className="edit-card">
               <div className="edit-card-head">
+                <select
+                  className="kind-select"
+                  aria-label="인터페이스 종류"
+                  value={row.kind}
+                  onChange={(ev) => patchInterface(row.key, { kind: ev.target.value as InterfaceKind })}
+                >
+                  {INTERFACE_KINDS.map((value) => (
+                    <option key={value} value={value}>
+                      {INTERFACE_KIND_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
                 <input
                   aria-label="인터페이스 이름"
                   spellCheck={false}
-                  placeholder="이름 (예: cancelJob, JobBar)"
+                  placeholder={row.kind === 'server' ? 'POST /api/...' : '이름 (예: cancelJob, JobBar)'}
                   value={row.name}
                   onChange={(ev) => patchInterface(row.key, { name: ev.target.value })}
                 />
@@ -198,12 +195,6 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
                   삭제
                 </button>
               </div>
-              <input
-                aria-label="인터페이스 설명"
-                placeholder="설명 (선택)"
-                value={row.description}
-                onChange={(ev) => patchInterface(row.key, { description: ev.target.value })}
-              />
               <div className="edit-card-io">
                 <textarea
                   aria-label="입력"
@@ -227,48 +218,10 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
           <button className="btn tiny" onClick={addInterface}>
             ＋ 인터페이스
           </button>
-        </div>
-
-        <div className="field">
-          <label>서버 호출 · 이 모듈에서 시작되는 요청</label>
-          {calls.length === 0 && <div className="help">서버 호출 없음</div>}
-          {calls.map((row) => (
-            <div key={row.key} className="edit-card">
-              <div className="edit-card-head">
-                <select
-                  aria-label="메서드"
-                  value={row.method}
-                  onChange={(ev) => patchCall(row.key, { method: ev.target.value })}
-                >
-                  {METHODS.map((method) => (
-                    <option key={method} value={method}>
-                      {method}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  aria-label="경로"
-                  spellCheck={false}
-                  placeholder="/api/..."
-                  value={row.path}
-                  onChange={(ev) => patchCall(row.key, { path: ev.target.value })}
-                />
-                <button className="textbtn" onClick={() => setCalls((rows) => rows.filter((r) => r.key !== row.key))}>
-                  삭제
-                </button>
-              </div>
-              <input
-                aria-label="서버 호출 설명"
-                placeholder="설명 (선택)"
-                value={row.description}
-                onChange={(ev) => patchCall(row.key, { description: ev.target.value })}
-              />
-            </div>
-          ))}
-          <button className="btn tiny" onClick={addCall}>
-            ＋ 서버 호출
-          </button>
-          <div className="help">서버 호출이 있는 모듈은 shared/api 모듈을 거쳐야 합니다.</div>
+          <div className="help">
+            서버 요청은 이름을 "POST /api/..." 형식으로 적습니다. 서버 요청이 있는 모듈은 shared/api 모듈을 거쳐야
+            합니다.
+          </div>
         </div>
 
         <div className="field">

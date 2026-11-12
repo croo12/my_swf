@@ -84,11 +84,11 @@ export const layoutStore = createStore<GraphLayout>(EMPTY);
 export function serverEndpoints(nodes: PlanNode[]): ServerEndpoint[] {
   const endpoints = new Map<string, ServerEndpoint>();
   for (const node of nodes) {
-    for (const call of node.serverCalls) {
-      const key = `${call.method} ${call.path}`;
-      const endpoint = endpoints.get(key) ?? { method: call.method, path: call.path, modules: [] };
+    for (const item of node.interfaces.filter((i) => i.kind === 'server')) {
+      const [method, ...rest] = item.name.split(' ');
+      const endpoint = endpoints.get(item.name) ?? { method, path: rest.join(' '), modules: [] };
       endpoint.modules.push(node.id);
-      endpoints.set(key, endpoint);
+      endpoints.set(item.name, endpoint);
     }
   }
   return [...endpoints.values()];

@@ -163,14 +163,15 @@ FSD source root (relative to the repository): {source_root}
 
 Request: {instruction}
 
-Read the code the request touches. Then answer with the modules to build or change: what each one is responsible for, what it does, what it exposes to other modules (its interfaces, each with its own inputs and outputs where it has any), which requests it sends to the server, where it is placed (layer, slice, segment), and which modules it imports from. A module is a unit with one responsibility that a developer can implement and review on its own. Write names and descriptions in the language of the request.
+Read the code the request touches. Then answer with the modules to build or change: what each one is responsible for, what it does, its interfaces (what it offers to other modules and the requests it sends to the server, each with its kind and with inputs and outputs where it has any), where it is placed (layer, slice, segment), and which modules it imports from. A module is a unit with one responsibility that a developer can implement and review on its own. Write names and descriptions in the language of the request.
 
 Your answer is checked by a program and rejected as a whole if any of these is not true:
 - Every module has a name, a responsibility, and a placement in one of the six FSD layers. pages, widgets, features and entities need a slice; app and shared have none.
 - A module marked "modify" or "existing" is at a placement that exists in the repository (list below), and every file it names exists there. "existing" modules are included only when another module in the plan imports from them.
 - Every module names its files. A "new" module names files that do not exist yet. Only client source files (ts, tsx, js, jsx, css, scss, json) can be planned; code outside the FSD layers is not part of a plan.
-- Every "new" or "modify" module states at least one behavior and exposes at least one named interface. Inputs and outputs of an interface may be empty.
-- A module that sends requests to the server is placed in shared/api or depends, directly or indirectly, on a module in shared/api. Server calls have a path starting with /.
+- Every "new" or "modify" module states at least one behavior and has at least one interface. An interface has a unique name and a kind; its inputs and outputs may be empty.
+- A module offers something other than types to other modules: a component, hook, function, store or constant. A file that only declares types is not a module; list its types and its file in the module that uses them.
+- A request to the server is an interface of kind "server", named METHOD /path. A module with such an interface is placed in shared/api or depends, directly or indirectly, on a module in shared/api.
 - A dependency points to a lower layer, or stays inside one slice. There are no cycles, no duplicates, and no dependencies that start at an "existing" module.
 
 The plan so far (keep these modules unless the request requires changing them):

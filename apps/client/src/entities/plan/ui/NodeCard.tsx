@@ -1,6 +1,6 @@
 import type { PointerEvent } from 'react';
 import { kindOf, layerOf, moduleNameOf } from '../model/path';
-import { MODULE_KIND_LABELS, type PlanNode } from '../model/types';
+import { INTERFACE_KIND_LABELS, MODULE_KIND_LABELS, type PlanNode } from '../model/types';
 
 interface NodeCardProps {
   node: PlanNode;
@@ -72,9 +72,10 @@ export function NodeCard({
           {node.interfaces.slice(0, VISIBLE_INTERFACES).map((item) => (
             <span
               key={item.name}
-              className="io-pill output"
-              title={`${item.name}\n입력: ${item.inputs.join(', ') || '없음'}\n출력: ${item.outputs.join(', ') || '없음'}`}
+              className={`io-pill output kind-${item.kind}`}
+              title={`${INTERFACE_KIND_LABELS[item.kind]} · ${item.name}\n입력: ${item.inputs.join(', ') || '없음'}\n출력: ${item.outputs.join(', ') || '없음'}`}
             >
+              {item.kind === 'server' ? '⇄ ' : ''}
               {item.name}
             </span>
           ))}
@@ -83,14 +84,6 @@ export function NodeCard({
       </div>
       <div className="node-bottom">
         <span title={(node.behaviors ?? []).join('\n')}>{footer.join(' · ')}</span>
-        {node.serverCalls.length > 0 && (
-          <span
-            className="node-server"
-            title={node.serverCalls.map((call) => `${call.method} ${call.path}`).join('\n')}
-          >
-            ⇄ 서버 {node.serverCalls.length}
-          </span>
-        )}
         <button
           className="textbtn link"
           onClick={(ev) => {

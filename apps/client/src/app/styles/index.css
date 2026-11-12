@@ -1939,3 +1939,19 @@ body {
 .workspace {
   min-width: 100%;
 }
+
+/* Interface kinds: server requests and types are told apart from what other modules can call. */
+.io-pill.kind-server {
+  background: #3f322d;
+  border-color: #6b543c;
+  color: #f0be80;
+}
+.io-pill.kind-type {
+  background: #27354b;
+  border-color: #40506a;
+  color: #9fb0c9;
+  font-style: italic;
+}
+.field .edit-card-head select.kind-select {
+  width: 96px;
+}
