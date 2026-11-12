@@ -7,8 +7,8 @@ import {
   SliceGroups,
   canvasHeight,
   canvasWidth,
-  laneY,
   layerOf,
+  nodeY,
   openEditor,
   planStore,
   selectionStore,
@@ -57,7 +57,7 @@ export function PlanCanvas({ scrollRef }: { scrollRef: RefObject<HTMLDivElement 
     setDragPos({
       id: drag.id,
       x: Math.max(CONTENT_LEFT + 10, Math.min(3000, drag.x + dx)),
-      y: laneY(layerOf(node)) + 62,
+      y: nodeY(layerOf(node)),
     });
   };
   const endDrag = (commit: boolean) => {
@@ -82,39 +82,35 @@ export function PlanCanvas({ scrollRef }: { scrollRef: RefObject<HTMLDivElement 
   };
 
   return (
-    <div className="graphscroll" ref={scrollRef}>
-      <div className="workspace" style={{ width, height }}>
-        <div className="graph-title">
-          <strong>FSD ARCHITECTURE / LAYER → SLICE → SEGMENT</strong>{' '}
-          <span>· 수평 레이어 안에 slice와 segment를 배치합니다</span>
-        </div>
-        <LayerLanes nodes={nodes} width={width} />
-        <SliceGroups nodes={nodes} />
-        <Edges edges={plan.edges} nodes={nodes} width={width} height={height} />
-        <div>
-          {nodes.map((n) => (
-            <NodeCard
-              key={n.id}
-              node={n}
-              requestCount={plan.requests.filter((r) => r.nodeId === n.id).length}
-              selected={selectedId === n.id}
-              connectSource={connectFromId === n.id}
-              onClick={() => clickNode(n.id)}
-              onEdit={() => openEditor(n.id)}
-              onToggleConnect={() => toggleConnectFrom(n.id)}
-              onPointerDown={(ev) => startDrag(ev, n)}
-              onPointerMove={(ev) => moveDrag(ev, n)}
-              onPointerUp={() => endDrag(true)}
-              onPointerCancel={() => endDrag(false)}
-            />
-          ))}
-        </div>
-        <div className={connectSource ? 'canvas-tip mode' : 'canvas-tip'}>
-          {connectSource
-            ? `연결 대상 노드를 클릭하세요. 출발점: ${connectSource.path}`
-            : 'Layer → Slice → Segment. 모듈 편집, 노드 이동, 연결 추가가 가능합니다.'}
+    <>
+      <div className="graphscroll" ref={scrollRef}>
+        <div className="workspace" style={{ width, height }}>
+          <LayerLanes nodes={nodes} width={width} />
+          <SliceGroups nodes={nodes} />
+          <Edges edges={plan.edges} nodes={nodes} width={width} height={height} />
+          <div>
+            {nodes.map((n) => (
+              <NodeCard
+                key={n.id}
+                node={n}
+                requestCount={plan.requests.filter((r) => r.nodeId === n.id).length}
+                selected={selectedId === n.id}
+                connectSource={connectFromId === n.id}
+                onClick={() => clickNode(n.id)}
+                onEdit={() => openEditor(n.id)}
+                onToggleConnect={() => toggleConnectFrom(n.id)}
+                onPointerDown={(ev) => startDrag(ev, n)}
+                onPointerMove={(ev) => moveDrag(ev, n)}
+                onPointerUp={() => endDrag(true)}
+                onPointerCancel={() => endDrag(false)}
+              />
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+      {connectSource && (
+        <div className="canvas-tip mode">연결 대상 노드를 클릭하세요. 출발점: {connectSource.path}</div>
+      )}
+    </>
   );
 }

@@ -6,7 +6,7 @@ import {
   clearSelection,
   closeEditor,
   commitPlan,
-  laneY,
+  nodeY,
   layerOf,
   layoutAll,
   mutatePlan,
@@ -82,7 +82,7 @@ export function addNode(): void {
     inputs: [],
     outputs: [],
     x: CONTENT_LEFT + 20,
-    y: laneY('features') + 62,
+    y: nodeY('features'),
   };
   mutatePlan('새 모듈이 추가되었습니다.', (p) => layoutAll({ ...p, nodes: [...p.nodes, node] }));
   openEditor(id);

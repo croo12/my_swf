@@ -1,7 +1,8 @@
 // The plan being edited, its undo history, and local persistence.
 import { createStore } from '@/shared/lib';
 import { notify } from '@/shared/ui/toast';
-import { layoutAll } from './layout';
+import { layoutAll, nodeY } from './layout';
+import { layerOf } from './path';
 import { SAMPLE } from './sample';
 import { clearSelection, selectionStore } from './selection';
 import type { Plan } from './types';
@@ -17,11 +18,16 @@ export interface PlanState {
 function loadPlan(): Plan {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
-    if (saved && Array.isArray(saved.nodes) && Array.isArray(saved.edges)) return saved as Plan;
+    if (saved && Array.isArray(saved.nodes) && Array.isArray(saved.edges)) return snapToLanes(saved as Plan);
   } catch {
     // Unreadable storage falls back to the sample graph.
   }
-  return structuredClone(SAMPLE);
+  return snapToLanes(structuredClone(SAMPLE));
+}
+
+/** Stored plans may carry heights from an older lane layout; the layer decides the height. */
+function snapToLanes(plan: Plan): Plan {
+  return { ...plan, nodes: plan.nodes.map((n) => ({ ...n, y: nodeY(layerOf(n)) })) };
 }
 
 export const planStore = createStore<PlanState>({ plan: loadPlan(), history: [] });

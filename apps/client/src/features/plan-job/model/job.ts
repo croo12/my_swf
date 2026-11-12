@@ -40,9 +40,13 @@ async function pollJob(id: string, baseVersion: number): Promise<void> {
   }
 }
 
-/** Sends the instruction and the current plan to the server. Returns true once the job was accepted. */
-export async function startJob(rawInstruction: string): Promise<boolean> {
-  const instruction = rawInstruction.trim();
+/**
+ * Sends the instruction and the current plan to the server. When the request is about one node,
+ * its path is put in front of the instruction. Returns true once the job was accepted.
+ */
+export async function startJob(rawInstruction: string, targetPath: string | null): Promise<boolean> {
+  const text = rawInstruction.trim();
+  const instruction = targetPath && text ? `[대상 노드: ${targetPath}] ${text}` : text;
   if (!instruction) {
     notify('Herdr에게 전달할 설계 요청을 입력하세요.');
     return false;

@@ -9,7 +9,7 @@ export {
   type PlanRequest,
 } from './model/types';
 export { cleanPath, isValidPath, layerOf, sliceOf, titleOf } from './model/path';
-export { CONTENT_LEFT, canvasHeight, canvasWidth, laneY, layoutAll } from './model/layout';
+export { CONTENT_LEFT, canvasHeight, canvasWidth, laneY, layoutAll, nodeY } from './model/layout';
 export { normalizeImported } from './model/rules';
 export { SAMPLE } from './model/sample';
 export { commitPlan, mutatePlan, planStore, replacePlan, undoPlan } from './model/store';
