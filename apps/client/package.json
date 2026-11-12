@@ -1,7 +1,7 @@
 {
   "name": "software-factory-client",
-  "private": true,
   "version": "0.1.1",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420",
@@ -12,19 +12,31 @@
     "desktop:build": "tauri build",
     "android:init": "tauri android init",
     "android:dev": "tauri android dev",
-    "android:build": "tauri android build --apk"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^4.7.0",
-    "babel-plugin-react-compiler": "^1.0.0",
-    "typescript": "^7.0.2",
-    "vite": "^6.0.0"
+    "android:build": "tauri android build --apk",
+    "typecheck": "tsc",
+    "lint": "oxlint && steiger ./src",
+    "lint:code": "oxlint",
+    "lint:fsd": "steiger ./src",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "check": "npm run typecheck && npm run lint && npm run fmt:check"
   },
   "dependencies": {
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@feature-sliced/steiger-plugin": "^0.8.2",
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "oxfmt": "^0.78.0",
+    "oxlint": "^1.93.0",
+    "steiger": "^0.10.0",
+    "typescript": "^7.0.2",
+    "vite": "^6.0.0"
   }
 }

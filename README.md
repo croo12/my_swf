@@ -9,13 +9,14 @@ This is a working *source starter*, not a prebuilt signed `.app`, `.msi`, or `.a
 ```text
 software-factory-multiplatform/
 ├── apps/client/                 # One shared Planning Workbench UI (React + TypeScript, React Compiler)
-│   ├── index.html               # Vite entry
-│   ├── src/
-│   │   ├── App.tsx              # Plan state, undo history, server and Herdr job actions
-│   │   ├── components/          # Canvas (lanes, slices, edges, nodes), EditPanel, ConnectionModal
-│   │   ├── model/plan.ts        # Plan schema v0.3, FSD layout and validation helpers
-│   │   └── api/factory.ts       # Factory server transport (Tauri command or fetch)
-│   ├── package.json             # Tauri / Vite commands
+│   ├── src/                     # Feature-Sliced Design layers; imports only point downward
+│   │   ├── app/                 # Entry point and global styles
+│   │   ├── pages/workbench/     # The single screen, composed from widgets
+│   │   ├── widgets/             # workbench-header, plan-canvas, command-bar
+│   │   ├── features/            # edit-graph, record-request, connect-server, server-sync, plan-transfer, plan-job
+│   │   ├── entities/plan/       # Plan schema v0.3, layout and validation, plan/selection stores, node and edge UI
+│   │   └── shared/              # api (Factory transport), lib (store), ui (toast)
+│   ├── package.json             # Tauri / Vite commands, plus `npm run check` (tsc, oxlint, steiger, oxfmt)
 │   └── src-tauri/               # Native Rust client for macOS/Windows/Android
 ├── crates/factory-server/
 │   └── src/
