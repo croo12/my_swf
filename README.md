@@ -123,15 +123,31 @@ npm run android:build    # APK; signing required for distribution
 
 Install and connect **Tailscale for Android** on the phone. Enter the Mac Studio's Tailscale Serve **HTTPS** URL in the app. The same graph UI is horizontally scrollable on smaller screens; a tablet/landscape orientation is more comfortable. Android acts as a remote **client**: Rust Factory and Herdr execute on Mac Studio, never on the phone.
 
-## F. Mac Studio server auto-start (optional)
+## F. Mac Studio server from releases, with automatic updates (optional)
 
-After creating `~/.config/software-factory/server.env` with `FACTORY_REPO_PATH`, `FACTORY_API_TOKEN`, and `FACTORY_DATA_DIR`, run:
+Instead of building on Mac Studio, run the server binary published with each GitHub Release. Mac Studio checks for a new release every 5 minutes and switches to it, so **pushing a release tag deploys the server**. Mac Studio pulls the release; nothing connects in from GitHub. Rust and a clone of this repository are not needed.
+
+One-time setup on Mac Studio (Apple Silicon):
 
 ```sh
-./scripts/macos/install-server-launchd.sh
+mkdir -p ~/.config/software-factory
+curl -fsSL https://raw.githubusercontent.com/croo12/my_swf/main/scripts/macos/server.env.example -o ~/.config/software-factory/server.env
+# Edit server.env: set FACTORY_REPO_PATH, FACTORY_DATA_DIR, and a FACTORY_API_TOKEN from `openssl rand -hex 32`.
+
+curl -fsSL https://raw.githubusercontent.com/croo12/my_swf/main/scripts/macos/release-server.sh -o /tmp/release-server.sh
+bash /tmp/release-server.sh install
 ```
 
-The script builds the Rust server and installs one user LaunchAgent. **Herdr still needs its own supervised `herdr server` process** under the same user for automated plans. Start that separately or manage it with your own launchd service; don't run two copies of the same Herdr session.
+This installs the latest release to `~/.local/share/software-factory-server/` and two user LaunchAgents: the server itself, and the update check. Settings stay in `server.env` and are never touched by updates.
+
+- An update waits while a planning job is running, because restarting the server orphans the job.
+- The previous binary is kept as `factory-server.previous` next to the current one.
+- Logs are in `~/Library/Logs/SoftwareFactory/`.
+- `bash ~/.local/share/software-factory-server/bin/release-server.sh update` checks immediately; `uninstall` removes both LaunchAgents.
+
+**Herdr still needs its own supervised `herdr server` process** under the same user for automated plans. Start that separately or manage it with your own launchd service; don't run two copies of the same Herdr session.
+
+To build from source on Mac Studio instead, use `./scripts/macos/install-server-launchd.sh` from a clone. Both scripts register the same server LaunchAgent, so use one or the other.
 
 ## Current limits
 
