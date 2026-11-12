@@ -37,9 +37,12 @@ export const INTERFACE_KIND_LABELS: Record<InterfaceKind, string> = {
 export interface ModuleInterface {
   name: string;
   kind: InterfaceKind;
-  /** Props, arguments or request data. Empty when there are none. */
+  /** Behavior as a condition and a result. `condition` is empty for something that always holds. */
+  condition: string;
+  result: string;
+  /** Props, arguments or request data, each written `name: Type`. Empty when there are none. */
   inputs: string[];
-  /** Return value, rendered UI or response. Empty when there is none. */
+  /** Return value or response, each a type or `name: Type`. Empty when there is none. */
   outputs: string[];
 }
 
@@ -53,10 +56,8 @@ export interface PlanNode {
   name?: string;
   kind?: ModuleKind;
   path: string;
-  /** What the module is responsible for. */
+  /** What the module is responsible for, in one sentence. */
   description: string;
-  /** What the module does, one behavior per entry. */
-  behaviors?: string[];
   /** Files the module consists of, relative to its placement. */
   files?: string[];
   /** What the module offers to other modules, and the requests it sends to the server. */

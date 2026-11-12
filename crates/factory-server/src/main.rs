@@ -163,16 +163,19 @@ FSD source root (relative to the repository): {source_root}
 
 Request: {instruction}
 
-Read the code the request touches. Then answer with the modules to build or change: what each one is responsible for, what it does, its interfaces (what it offers to other modules and the requests it sends to the server, each with its kind and with inputs and outputs where it has any), where it is placed (layer, slice, segment), and which modules it imports from. A module is a unit with one responsibility that a developer can implement and review on its own. Write names and descriptions in the language of the request.
+Read the code the request touches. Then answer with the modules to build or change. A module is a unit with one responsibility that a developer can implement and review on its own. For each module give its responsibility, its placement (layer, slice, segment), its files, and its interfaces: what it offers to other modules and the requests it sends to the server. Describe behavior only per interface, as a condition and one result. Write inputs and outputs as TypeScript, not as descriptions. Write names and sentences in the language of the request.
 
 Your answer is checked by a program and rejected as a whole if any of these is not true:
-- Every module has a name, a responsibility, and a placement in one of the six FSD layers. pages, widgets, features and entities need a slice; app and shared have none.
+- Every module has a name, a one-sentence responsibility, and a placement in one of the six FSD layers. pages, widgets, features and entities need a slice; app and shared have none.
 - A module marked "modify" or "existing" is at a placement that exists in the repository (list below), and every file it names exists there. "existing" modules are included only when another module in the plan imports from them.
 - Every module names its files. A "new" module names files that do not exist yet. Only client source files (ts, tsx, js, jsx, css, scss, json) can be planned; code outside the FSD layers is not part of a plan.
-- Every "new" or "modify" module states at least one behavior and has at least one interface. An interface has a unique name and a kind; its inputs and outputs may be empty.
+- Every "new" or "modify" module has at least one interface. An interface has a unique name and a kind.
+- Every component, hook, function, store and server interface of a "new" or "modify" module states its "result". "condition" holds the condition or trigger and is empty if the result always holds. Each is one sentence.
+- Every input is written name: Type, and every output is a type or name: Type, using TypeScript types (for example id: string, Promise<boolean>, job: JobView | null). Prose is rejected.
 - A module offers something other than types to other modules: a component, hook, function, store or constant. A file that only declares types is not a module; list its types and its file in the module that uses them.
 - A request to the server is an interface of kind "server", named METHOD /path. A module with such an interface is placed in shared/api or depends, directly or indirectly, on a module in shared/api.
 - A dependency points to a lower layer, or stays inside one slice. There are no cycles, no duplicates, and no dependencies that start at an "existing" module.
+- The length and size limits stated in the answer schema hold.
 
 The plan so far (keep these modules unless the request requires changing them):
 {current_plan}
@@ -201,7 +204,9 @@ fn run_codex(job_dir:&Path)->i32 {
     let run=|| -> Result<i32,String> {
         let settings:Value=serde_json::from_slice(&std::fs::read(job_dir.join("run.json")).map_err(|e|format!("run.json: {e}"))?).map_err(|e|format!("run.json: {e}"))?;
         let cwd=settings.get("cwd").and_then(Value::as_str).ok_or("run.json has no cwd")?;
-        let codex=env::var("CODEX_BIN").unwrap_or_else(|_|"codex".into());
+        // The pane's shell does not have the server's environment, so the server passes its
+        // CODEX_BIN setting through run.json.
+        let codex=settings.get("codex").and_then(Value::as_str).unwrap_or("codex").to_owned();
         let prompt=std::fs::File::open(job_dir.join("prompt.txt")).map_err(|e|format!("prompt.txt: {e}"))?;
         // On Windows codex is a .cmd shim, which only the command interpreter can start.
         let mut command=if cfg!(windows) {let mut c=std::process::Command::new("cmd");c.args(["/C",&codex]);c} else {std::process::Command::new(&codex)};
@@ -220,6 +225,8 @@ fn run_codex(job_dir:&Path)->i32 {
 }
 
 const AGENT_TIMEOUT:Duration=Duration::from_secs(900);
+/// How often the agent is asked: once, plus retries that carry the violations of the previous answer.
+const MAX_ATTEMPTS:usize=3;
 
 async fn execute_job(s:Arc<AppState>,id:String,instruction:String) {
     let dir=s.data_dir.join("jobs").join(&id);
@@ -236,43 +243,56 @@ async fn execute_job(s:Arc<AppState>,id:String,instruction:String) {
         let current_plan=input.get("plan").cloned().unwrap_or(Value::Null);
 
         // 2. The job files: task, answer schema, and where the agent runs.
-        let prompt=planning_prompt(&s.repository.to_string_lossy(),&source_root,&instruction,&current_plan,&existing);
-        fs::write(dir.join("prompt.txt"),prompt).await.map_err(|e|e.to_string())?;
+        let task=planning_prompt(&s.repository.to_string_lossy(),&source_root,&instruction,&current_plan,&existing);
         write_json(&dir.join("schema.json"),&planner::output_schema()).await.map_err(|e|e.1)?;
-        write_json(&dir.join("run.json"),&json!({"cwd":s.repository})).await.map_err(|e|e.1)?;
+        write_json(&dir.join("run.json"),&json!({"cwd":s.repository,"codex":env::var("CODEX_BIN").unwrap_or_else(|_|"codex".into())})).await.map_err(|e|e.1)?;
+        let paths:HashSet<String>=existing.iter().cloned().collect();
+        let root=s.repository.join(&source_root);
 
-        // 3. Run the agent in a Herdr pane and wait for it to finish.
+        // 3. A Herdr workspace in which the agent runs, so its progress can be watched.
         update_job(&s,&id,"running","Herdr workspace 생성 중".into(),None,None).await;
         let created=cli(&s,&["workspace","create","--cwd",&s.repository.to_string_lossy(),"--label",&label,"--no-focus"],Duration::from_secs(35)).await?;
         let data:Value=serde_json::from_str(&created).map_err(|e|format!("Workspace JSON decode failed: {e}: {created}"))?;
         let pane=data.pointer("/result/root_pane/pane_id").and_then(Value::as_str).ok_or_else(||format!("Herdr root pane id missing: {created}"))?.to_owned();
         // A new pane needs a moment before its shell accepts a command.
         tokio::time::sleep(Duration::from_secs(3)).await;
-        run_agent_in_pane(&s,&dir,&pane).await?;
-        update_job(&s,&id,"running",format!("Codex가 계획을 만드는 중 (Herdr {label})"),Some("codex".into()),Some(pane)).await;
-        let exit_file=dir.join("exit.json");
-        let started=std::time::Instant::now();
-        while !exit_file.is_file() {
-            if started.elapsed()>AGENT_TIMEOUT {return Err(format!("Codex did not finish within {} minutes.",AGENT_TIMEOUT.as_secs()/60));}
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        }
-        let exit=read_json(&exit_file).await.map_err(|e|e.1)?;
-        if exit.get("code").and_then(Value::as_i64)!=Some(0) {
-            return Err(format!("Codex exited with an error: {}. See the Herdr workspace {label}.",exit.get("error").and_then(Value::as_str).unwrap_or("non-zero exit code")));
-        }
 
-        // 4. The answer must parse into the typed proposal and pass every static check.
-        update_job(&s,&id,"running","제안 검증 중".into(),None,None).await;
-        let answer=fs::read_to_string(dir.join("result.json")).await.map_err(|e|format!("Codex produced no answer: {e}"))?;
-        let proposal:planner::Proposal=serde_json::from_str(&answer).map_err(|e|format!("제안이 정해진 구조가 아니어서 거절했습니다: {e}"))?;
-        let paths:HashSet<String>=existing.iter().cloned().collect();
-        let root=s.repository.join(&source_root);
-        let errors=planner::validate(&proposal,&planner::Disk{paths:&paths,file_exists:&|file|root.join(file).is_file()});
-        if !errors.is_empty() {
-            let _=write_json(&dir.join("rejected.json"),&json!({"errors":errors})).await;
-            return Err(format!("제안이 검증을 통과하지 못해 거절했습니다 ({}건):\n- {}",errors.len(),errors.join("\n- ")));
+        // 4. Ask, check, and on rejection ask again with the violations. The answer is accepted
+        //    only if it parses into the typed proposal and passes every static check.
+        let mut feedback=String::new();
+        let mut rejection=String::new();
+        for attempt in 1..=MAX_ATTEMPTS {
+            fs::write(dir.join("prompt.txt"),format!("{task}{feedback}")).await.map_err(|e|e.to_string())?;
+            let exit_file=dir.join("exit.json");
+            let _=fs::remove_file(&exit_file).await;
+            let _=fs::remove_file(dir.join("result.json")).await;
+            run_agent_in_pane(&s,&dir,&pane).await?;
+            update_job(&s,&id,"running",format!("Codex가 계획을 만드는 중 · 시도 {attempt}/{MAX_ATTEMPTS} (Herdr {label})"),Some("codex".into()),Some(pane.clone())).await;
+            let started=std::time::Instant::now();
+            while !exit_file.is_file() {
+                if started.elapsed()>AGENT_TIMEOUT {return Err(format!("Codex did not finish within {} minutes.",AGENT_TIMEOUT.as_secs()/60));}
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            let exit=read_json(&exit_file).await.map_err(|e|e.1)?;
+            if exit.get("code").and_then(Value::as_i64)!=Some(0) {
+                return Err(format!("Codex exited with an error: {}. See the Herdr workspace {label}.",exit.get("error").and_then(Value::as_str).unwrap_or("non-zero exit code")));
+            }
+            let answer=fs::read_to_string(dir.join("result.json")).await.map_err(|e|format!("Codex produced no answer: {e}"))?;
+            let _=fs::write(dir.join(format!("result-{attempt}.json")),&answer).await;
+            let errors=match serde_json::from_str::<planner::Proposal>(&answer) {
+                Ok(proposal) => {
+                    let errors=planner::validate(&proposal,&planner::Disk{paths:&paths,file_exists:&|file|root.join(file).is_file()});
+                    if errors.is_empty() {return Ok(planner::to_plan(&proposal));}
+                    errors
+                }
+                Err(e) => vec![format!("The answer does not have the required structure: {e}")],
+            };
+            let _=write_json(&dir.join(format!("rejected-{attempt}.json")),&json!({"errors":errors})).await;
+            rejection=format!("제안이 검증을 통과하지 못해 거절했습니다 ({}건, {attempt}회 시도):\n- {}",errors.len(),errors.join("\n- "));
+            // The next attempt gets the rejected answer and exactly what was wrong with it.
+            feedback=format!("\n\nYour previous answer was rejected by the checking program. Correct every violation listed here and answer again in full; keep what was not wrong.\nViolations:\n- {}\n\nYour previous answer:\n{answer}\n",errors.join("\n- "));
         }
-        Ok(planner::to_plan(&proposal))
+        Err(rejection)
     }.await;
     match result {
         Ok(plan) => match write_json(&dir.join("proposed-plan.json"),&plan).await {

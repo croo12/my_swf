@@ -40,6 +40,8 @@ function interfacesOf(n: Loose, fallbackName: string): ModuleInterface[] {
         .map((item) => ({
           name: String(item.name).trim(),
           kind: interfaceKind(item.kind),
+          condition: String(item.condition ?? ''),
+          result: String(item.result ?? ''),
           inputs: stringArray(item.inputs),
           outputs: stringArray(item.outputs),
         }))
@@ -47,14 +49,14 @@ function interfacesOf(n: Loose, fallbackName: string): ModuleInterface[] {
   // Plans made before interfaces existed kept one list of inputs and outputs on the module.
   const [inputs, outputs] = [stringArray(n.inputs), stringArray(n.outputs)];
   if (!Array.isArray(n.interfaces) && inputs.length + outputs.length > 0) {
-    interfaces.push({ name: fallbackName, kind: 'function', inputs, outputs });
+    interfaces.push({ name: fallbackName, kind: 'function', condition: '', result: '', inputs, outputs });
   }
   // An earlier shape listed server requests separately; they are interfaces like the rest.
   for (const call of Array.isArray(n.serverCalls) ? (n.serverCalls as Loose[]) : []) {
     if (typeof call?.path !== 'string' || !call.path.trim()) continue;
     const name = `${String(call.method ?? 'GET').toUpperCase()} ${call.path.trim()}`;
     if (!interfaces.some((item) => item.name === name))
-      interfaces.push({ name, kind: 'server', inputs: [], outputs: [] });
+      interfaces.push({ name, kind: 'server', condition: '', result: '', inputs: [], outputs: [] });
   }
   return interfaces;
 }
@@ -84,7 +86,6 @@ export function normalizeImported(data: unknown): Plan {
           ? 'existing'
           : 'new',
       description: String(n.description ?? ''),
-      behaviors: stringArray(n.behaviors),
       files: stringArray(n.files),
       interfaces: interfacesOf(
         n,

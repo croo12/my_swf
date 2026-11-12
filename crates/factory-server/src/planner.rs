@@ -9,10 +9,25 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
 pub const MAX_MODULES: usize = 60;
-/// File types that can live in the FSD layers. A plan cannot place other code (for example Rust) there.
 /// The segment of the shared layer through which every request to the server passes.
 const API_SEGMENT: &str = "api";
+/// File types that can live in the FSD layers. A plan cannot place other code (for example Rust) there.
 const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mts", "mjs", "css", "scss", "json"];
+
+// Limits on free text and on list sizes, counted in characters. Prose is where a plan becomes
+// vague, so there is little room for it: one sentence of responsibility per module and one
+// condition/result pair per interface. Everything else is names and types.
+const MAX_SUMMARY: usize = 300;
+const MAX_NAME: usize = 40;
+const MAX_RESPONSIBILITY: usize = 100;
+const MAX_CONDITION: usize = 80;
+const MAX_RESULT: usize = 100;
+const MAX_INTERFACES: usize = 12;
+const MAX_PORTS: usize = 8;
+const MAX_PORT: usize = 120;
+const MAX_FILES: usize = 12;
+/// Words that may stand next to another word inside a TypeScript type expression.
+const TYPE_KEYWORDS: &[&str] = &["keyof", "typeof", "readonly", "extends", "infer", "in", "is", "new", "unique", "asserts", "abstract"];
 
 /// What the validator needs to know about the repository.
 pub struct Disk<'a> {
@@ -80,9 +95,13 @@ pub struct Interface {
     /// Exported name; for a server request, "METHOD /path" (for example "POST /api/jobs").
     pub name: String,
     pub kind: InterfaceKind,
-    /// What it takes: props, arguments, request data. May be empty.
+    /// Behavior as a condition and a result, the two halves of an EARS requirement ("when
+    /// <condition>, the module shall <result>"). `condition` is empty for something that always holds.
+    pub condition: String,
+    pub result: String,
+    /// What it takes, each written `name: Type`. May be empty.
     pub inputs: Vec<String>,
-    /// What it gives back: return value, rendered UI, response. May be empty.
+    /// What it gives back, each written `name: Type` or as a bare type. May be empty.
     pub outputs: Vec<String>,
 }
 
@@ -96,11 +115,10 @@ pub struct Module {
     /// Slice path below the layer ("home/assignment"); null in app and shared.
     pub slice: Option<String>,
     pub segment: String,
+    /// One sentence.
     pub responsibility: String,
-    /// What the module does, one behavior per entry.
-    pub behaviors: Vec<String>,
     /// Where the module meets the outside: what it offers to other modules and the requests it
-    /// sends to the server. Each entry has its own inputs and outputs.
+    /// sends to the server. Each entry states its own behavior, inputs and outputs.
     pub interfaces: Vec<Interface>,
     pub files: Vec<String>,
 }
@@ -139,30 +157,31 @@ pub fn output_schema() -> Value {
         "type":"object","additionalProperties":false,
         "required":["summary","modules","dependencies"],
         "properties":{
-            "summary":{"type":"string","description":"What the plan builds, in two or three sentences."},
+            "summary":{"type":"string","description":format!("What the plan builds. At most {MAX_SUMMARY} characters.")},
             "modules":{"type":"array","items":{
                 "type":"object","additionalProperties":false,
-                "required":["id","name","kind","layer","slice","segment","responsibility","behaviors","interfaces","files"],
+                "required":["id","name","kind","layer","slice","segment","responsibility","interfaces","files"],
                 "properties":{
                     "id":{"type":"string","description":"Unique id within this plan."},
-                    "name":{"type":"string","description":"Short module name."},
+                    "name":{"type":"string","description":format!("Module name. At most {MAX_NAME} characters.")},
                     "kind":{"type":"string","enum":["new","modify","existing"],
                         "description":"new: to be created. modify: exists and must change. existing: exists, unchanged, and a new or modified module depends on it."},
                     "layer":{"type":"string","enum":["app","pages","widgets","features","entities","shared"]},
                     "slice":{"type":["string","null"],"description":"Slice path below the layer, e.g. home/assignment. null in app and shared."},
                     "segment":{"type":"string","description":"Segment inside the slice (or inside app/shared), e.g. ui, model, api."},
-                    "responsibility":{"type":"string","description":"The single responsibility of the module."},
-                    "behaviors":{"type":"array","items":{"type":"string"},"description":"What the module does, one behavior per entry."},
-                    "interfaces":{"type":"array","description":"Where the module meets the outside. One entry per thing it offers to other modules, and one per request it sends to the server.",
-                        "items":{"type":"object","additionalProperties":false,"required":["name","kind","inputs","outputs"],
+                    "responsibility":{"type":"string","description":format!("The single responsibility of the module, as one sentence of at most {MAX_RESPONSIBILITY} characters.")},
+                    "interfaces":{"type":"array","description":format!("Where the module meets the outside. One entry per thing it offers to other modules, and one per request it sends to the server. At most {MAX_INTERFACES}."),
+                        "items":{"type":"object","additionalProperties":false,"required":["name","kind","condition","result","inputs","outputs"],
                             "properties":{
                                 "name":{"type":"string","description":"Exported name. For kind server: the request as METHOD /path, e.g. POST /api/jobs."},
                                 "kind":{"type":"string","enum":["component","hook","function","store","constant","type","server"],
                                     "description":"component, hook, function, store, constant, type: offered to other modules. server: a request this module sends to the server."},
-                                "inputs":{"type":"array","items":{"type":"string"},"description":"Props, arguments or request data. Empty when there are none."},
-                                "outputs":{"type":"array","items":{"type":"string"},"description":"Return value, rendered UI or response. Empty when there is none."}
+                                "condition":{"type":"string","description":format!("The condition or trigger of the behavior. Empty when the result always holds. At most {MAX_CONDITION} characters.")},
+                                "result":{"type":"string","description":format!("What happens under that condition: one observable result. At most {MAX_RESULT} characters. May be empty for kind type and constant.")},
+                                "inputs":{"type":"array","items":{"type":"string"},"description":format!("Props, arguments or request data, each written name: Type with a TypeScript type, e.g. id: string. At most {MAX_PORTS}. Empty when there are none.")},
+                                "outputs":{"type":"array","items":{"type":"string"},"description":format!("Return value or response, each a TypeScript type or name: Type, e.g. Promise<boolean>. At most {MAX_PORTS}. Empty when there is none.")}
                             }}},
-                    "files":{"type":"array","items":{"type":"string"},"description":"File names inside the placement."}
+                    "files":{"type":"array","items":{"type":"string"},"description":format!("File names inside the placement. At most {MAX_FILES}.")}
                 }
             }},
             "dependencies":{"type":"array","items":{
@@ -182,6 +201,63 @@ fn is_server_request(name: &str) -> bool {
     ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method) && path.starts_with('/') && !path.contains(char::is_whitespace)
 }
 
+fn is_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$') && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+}
+
+/// Whether the text can be a TypeScript type expression. This is not a parser: it accepts only
+/// ASCII, requires balanced brackets, and rejects two plain words in a row (as in a phrase)
+/// unless one of them is a type keyword such as `keyof`. That is enough to keep prose out.
+fn is_type_expression(text: &str) -> bool {
+    let text = text.trim();
+    if text.is_empty() || !text.is_ascii() { return false; }
+    let mut open: Vec<char> = vec![];
+    let mut previous_word: Option<String> = None;
+    let mut previous_char = ' ';
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        let before = std::mem::replace(&mut previous_char, c);
+        match c {
+            // String literal types may contain anything.
+            '\'' | '"' | '`' => { for inner in chars.by_ref() { if inner == c { break; } } previous_word = None; }
+            '(' | '[' | '{' | '<' => { open.push(c); previous_word = None; }
+            // "=>" is the arrow of a function type, not a closing bracket.
+            '>' if before == '=' => previous_word = None,
+            ')' | ']' | '}' | '>' => {
+                let expected = match c { ')' => '(', ']' => '[', '}' => '{', _ => '<' };
+                if open.pop() != Some(expected) { return false; }
+                previous_word = None;
+            }
+            c if c.is_ascii_alphanumeric() || c == '_' || c == '$' => {
+                let mut word = c.to_string();
+                while let Some(&next) = chars.peek() {
+                    if next.is_ascii_alphanumeric() || next == '_' || next == '$' { word.push(next); chars.next(); } else { break; }
+                }
+                // Two words in a row are fine only around a type keyword: "keyof T", "T extends U".
+                if previous_word.as_deref().is_some_and(|before| !TYPE_KEYWORDS.contains(&before) && !TYPE_KEYWORDS.contains(&word.as_str())) { return false; }
+                previous_word = Some(word);
+            }
+            c if c.is_whitespace() => {}
+            _ => previous_word = None,
+        }
+    }
+    open.is_empty()
+}
+
+/// `name: Type`, with an optional `?` after the name.
+fn is_typed_name(entry: &str) -> bool {
+    entry.split_once(':').is_some_and(|(name, ty)| is_identifier(name.trim().trim_end_matches('?')) && is_type_expression(ty))
+}
+
+/// One sentence: no line breaks, and no sentence end followed by more text.
+fn is_one_sentence(text: &str) -> bool {
+    let text = text.trim().trim_end_matches(['.', '。']);
+    !text.contains('\n') && !text.contains(". ") && !text.contains("。")
+}
+
+fn length(text: &str) -> usize { text.trim().chars().count() }
+
 fn is_clean_name(part: &str) -> bool {
     !part.is_empty() && part != "." && part != ".." && part.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'))
 }
@@ -194,6 +270,7 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
     if modules.is_empty() { errors.push("The plan has no modules.".to_owned()); }
     if modules.len() > MAX_MODULES { errors.push(format!("The plan has {} modules; at most {MAX_MODULES} are allowed.", modules.len())); }
     if !modules.iter().any(|m| m.kind != Kind::Existing) { errors.push("The plan creates or changes nothing: every module is marked existing.".to_owned()); }
+    if length(&proposal.summary) > MAX_SUMMARY { errors.push(format!("The summary has {} characters; at most {MAX_SUMMARY} are allowed.", length(&proposal.summary))); }
 
     let mut by_id: HashMap<&str, &Module> = HashMap::new();
     for m in modules {
@@ -202,6 +279,11 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
         else if by_id.insert(m.id.as_str(), m).is_some() { errors.push(format!("Module id \"{}\" is used more than once.", m.id)); }
         if m.name.trim().is_empty() { errors.push(format!("Module \"{}\" has no name.", m.id)); }
         if m.responsibility.trim().is_empty() { errors.push(format!("Module \"{label}\" has no responsibility.")); }
+        if length(&m.name) > MAX_NAME { errors.push(format!("Module name \"{label}\" has {} characters; at most {MAX_NAME} are allowed.", length(&m.name))); }
+        if length(&m.responsibility) > MAX_RESPONSIBILITY { errors.push(format!("Module \"{label}\": the responsibility has {} characters; at most {MAX_RESPONSIBILITY} are allowed.", length(&m.responsibility))); }
+        if !is_one_sentence(&m.responsibility) { errors.push(format!("Module \"{label}\": the responsibility must be one sentence.")); }
+        if m.interfaces.len() > MAX_INTERFACES { errors.push(format!("Module \"{label}\" has {} interfaces; at most {MAX_INTERFACES} are allowed. Split the module.", m.interfaces.len())); }
+        if m.files.len() > MAX_FILES { errors.push(format!("Module \"{label}\" names {} files; at most {MAX_FILES} are allowed. Split the module.", m.files.len())); }
 
         // Placement: layer is an enum, so code outside the FSD layers cannot be expressed at all.
         if !is_clean_name(&m.segment) { errors.push(format!("Module \"{label}\": segment \"{}\" is not a valid folder name.", m.segment)); }
@@ -230,22 +312,34 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
             }
         }
 
-        // Behavior and interface are what make a module reviewable; planned work must state them.
-        if m.kind != Kind::Existing {
-            if m.behaviors.iter().all(|b| b.trim().is_empty()) { errors.push(format!("Module \"{label}\" ({}) states no behavior.", m.kind.name())); }
-            if m.interfaces.is_empty() { errors.push(format!("Module \"{label}\" ({}) exposes no interface.", m.kind.name())); }
-        }
-        if m.behaviors.iter().any(|b| b.trim().is_empty()) { errors.push(format!("Module \"{label}\" has an empty behavior entry.")); }
-        // An interface needs a name and a kind; its inputs and outputs are optional.
+        // Interfaces are what make a module reviewable; planned work must state them.
+        if m.kind != Kind::Existing && m.interfaces.is_empty() { errors.push(format!("Module \"{label}\" ({}) exposes no interface.", m.kind.name())); }
         let mut interface_names = HashSet::new();
         for interface in &m.interfaces {
+            let at = format!("Module \"{label}\": interface \"{}\"", interface.name);
             if interface.name.trim().is_empty() { errors.push(format!("Module \"{label}\" has an interface without a name.")); }
             else if !interface_names.insert(interface.name.as_str()) { errors.push(format!("Module \"{label}\" lists the interface \"{}\" more than once.", interface.name)); }
-            if interface.inputs.iter().chain(&interface.outputs).any(|s| s.trim().is_empty()) {
-                errors.push(format!("Module \"{label}\": interface \"{}\" has an empty input or output entry.", interface.name));
-            }
             if interface.kind == InterfaceKind::Server && !is_server_request(&interface.name) {
                 errors.push(format!("Module \"{label}\": server interface \"{}\" must be named METHOD /path, for example POST /api/jobs.", interface.name));
+            }
+
+            // Behavior: one condition and one result. Planned work must state the result of
+            // everything that does something; a type or a constant does nothing by itself.
+            let acts = !matches!(interface.kind, InterfaceKind::Type | InterfaceKind::Constant);
+            if m.kind != Kind::Existing && acts && interface.result.trim().is_empty() { errors.push(format!("{at} states no result.")); }
+            if length(&interface.condition) > MAX_CONDITION { errors.push(format!("{at}: the condition has {} characters; at most {MAX_CONDITION} are allowed.", length(&interface.condition))); }
+            if length(&interface.result) > MAX_RESULT { errors.push(format!("{at}: the result has {} characters; at most {MAX_RESULT} are allowed.", length(&interface.result))); }
+            if !is_one_sentence(&interface.condition) || !is_one_sentence(&interface.result) { errors.push(format!("{at}: the condition and the result must each be one sentence.")); }
+
+            // Inputs and outputs are names and types, not descriptions.
+            if interface.inputs.len() > MAX_PORTS || interface.outputs.len() > MAX_PORTS { errors.push(format!("{at} has more than {MAX_PORTS} inputs or outputs.")); }
+            for input in &interface.inputs {
+                if length(input) > MAX_PORT { errors.push(format!("{at}: input \"{input}\" is longer than {MAX_PORT} characters.")); }
+                else if !is_typed_name(input) { errors.push(format!("{at}: input \"{input}\" must be written name: Type with a TypeScript type, for example id: string.")); }
+            }
+            for output in &interface.outputs {
+                if length(output) > MAX_PORT { errors.push(format!("{at}: output \"{output}\" is longer than {MAX_PORT} characters.")); }
+                else if !is_typed_name(output) && !is_type_expression(output) { errors.push(format!("{at}: output \"{output}\" must be a TypeScript type or name: Type, for example Promise<boolean>.")); }
             }
         }
         // A file that only declares types is not a module: it does nothing in the module graph.
@@ -328,9 +422,8 @@ fn find_cycle<'a>(graph: &HashMap<&'a str, Vec<&'a str>>) -> Option<&'a str> {
 /// Converts a validated proposal into the plan document the client edits.
 pub fn to_plan(proposal: &Proposal) -> Value {
     let nodes: Vec<Value> = proposal.modules.iter().map(|m| json!({
-        "id":m.id,"name":m.name,"kind":m.kind.name(),"path":m.path(),
-        "description":m.responsibility,"behaviors":m.behaviors,
-        "interfaces":m.interfaces.iter().map(|i| json!({"name":i.name,"kind":i.kind.name(),"inputs":i.inputs,"outputs":i.outputs})).collect::<Vec<_>>(),
+        "id":m.id,"name":m.name,"kind":m.kind.name(),"path":m.path(),"description":m.responsibility,
+        "interfaces":m.interfaces.iter().map(|i| json!({"name":i.name,"kind":i.kind.name(),"condition":i.condition,"result":i.result,"inputs":i.inputs,"outputs":i.outputs})).collect::<Vec<_>>(),
         "files":m.files
     })).collect();
     let edges: Vec<Value> = proposal.dependencies.iter().enumerate().map(|(i, d)| json!({
@@ -343,9 +436,12 @@ pub fn to_plan(proposal: &Proposal) -> Value {
 mod tests {
     use super::*;
 
+    fn interface(name: &str, kind: &str) -> Value {
+        json!({"name":name,"kind":kind,"condition":"the caller asks","result":"it answers","inputs":["id: string"],"outputs":["Promise<boolean>"]})
+    }
     fn module(id: &str, kind: &str, layer: &str, slice: Option<&str>, segment: &str) -> Value {
         json!({"id":id,"name":id,"kind":kind,"layer":layer,"slice":slice,"segment":segment,"responsibility":"does one thing",
-            "behaviors":["does it"],"interfaces":[{"name":"thing","kind":"function","inputs":[],"outputs":["out"]}],"files":["a.ts"]})
+            "interfaces":[interface("thing", "function")],"files":["a.ts"]})
     }
     fn proposal(modules: Vec<Value>, dependencies: Vec<(&str, &str)>) -> Proposal {
         let deps: Vec<Value> = dependencies.into_iter().map(|(from, to)| json!({"from":from,"to":to})).collect();
@@ -357,7 +453,14 @@ mod tests {
         let files: HashSet<String> = paths.iter().map(|p| format!("{p}/a.ts")).collect();
         validate(p, &Disk { paths: &paths, file_exists: &|file| files.contains(file) })
     }
+    /// Validates one new module whose only interface is the given one.
+    fn check_interface(interface: Value) -> Vec<String> {
+        let mut m = module("a", "new", "features", Some("x"), "ui");
+        m["interfaces"] = json!([interface]);
+        check(&proposal(vec![m], vec![]), &[])
+    }
     fn has(errors: &[String], part: &str) -> bool { errors.iter().any(|e| e.contains(part)) }
+    const NONE: Vec<String> = Vec::new();
 
     #[test]
     fn accepts_a_well_formed_plan() {
@@ -366,7 +469,7 @@ mod tests {
             module("model", "modify", "features", Some("plan-job"), "model"),
             module("api", "existing", "shared", None, "api"),
         ], vec![("ui", "api"), ("model", "api")]);
-        assert_eq!(check(&p, &["features/plan-job/model", "shared/api"]), Vec::<String>::new());
+        assert_eq!(check(&p, &["features/plan-job/model", "shared/api"]), NONE);
     }
 
     #[test]
@@ -376,16 +479,35 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_fields() {
+    fn rejects_unknown_fields_and_unknown_kinds() {
         let mut m = module("a", "new", "features", Some("x"), "ui");
-        m["extra"] = json!(1);
+        m["behaviors"] = json!(["free prose"]);
         assert!(serde_json::from_value::<Proposal>(json!({"summary":"s","dependencies":[],"modules":[m]})).is_err());
+        let mut k = module("a", "new", "features", Some("x"), "ui");
+        k["interfaces"] = json!([interface("x", "service")]);
+        assert!(serde_json::from_value::<Proposal>(json!({"summary":"s","dependencies":[],"modules":[k]})).is_err());
     }
 
     #[test]
     fn rejects_claims_about_modules_that_are_not_on_disk() {
         let p = proposal(vec![module("m", "modify", "features", Some("ghost"), "model")], vec![]);
         assert!(has(&check(&p, &[]), "does not exist in the repository"));
+    }
+
+    #[test]
+    fn rejects_files_that_contradict_the_disk_or_do_not_belong_in_fsd() {
+        let mut no_files = module("a", "modify", "features", Some("x"), "ui");
+        no_files["files"] = json!([]);
+        let mut wrong_file = module("b", "modify", "features", Some("x"), "ui");
+        wrong_file["files"] = json!(["missing.ts"]);
+        let mut rust = module("c", "new", "app", None, "server");
+        rust["files"] = json!(["main.rs"]);
+        let already_there = module("d", "new", "features", Some("x"), "ui");
+        let errors = check(&proposal(vec![no_files, wrong_file, rust, already_there], vec![]), &["features/x/ui"]);
+        assert!(has(&errors, "names no files"), "{errors:?}");
+        assert!(has(&errors, "missing.ts does not exist"), "{errors:?}");
+        assert!(has(&errors, "not a source file that belongs in the FSD layers"), "{errors:?}");
+        assert!(has(&errors, "already exists"), "{errors:?}");
     }
 
     #[test]
@@ -411,75 +533,134 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_behavior_interface_and_dangling_dependencies() {
+    fn rejects_missing_interfaces_and_dangling_dependencies() {
         let mut m = module("a", "new", "features", Some("x"), "ui");
-        m["behaviors"] = json!([]);
         m["interfaces"] = json!([]);
-        let p = proposal(vec![m], vec![("a", "nowhere")]);
-        let errors = check(&p, &[]);
-        assert!(has(&errors, "states no behavior") && has(&errors, "exposes no interface") && has(&errors, "not in the plan"));
+        let errors = check(&proposal(vec![m], vec![("a", "nowhere")]), &[]);
+        assert!(has(&errors, "exposes no interface") && has(&errors, "not in the plan"), "{errors:?}");
     }
 
     #[test]
-    fn rejects_files_that_contradict_the_disk_or_do_not_belong_in_fsd() {
-        let mut no_files = module("a", "modify", "features", Some("x"), "ui");
-        no_files["files"] = json!([]);
-        let mut wrong_file = module("b", "modify", "features", Some("x"), "ui");
-        wrong_file["files"] = json!(["missing.ts"]);
-        let mut rust = module("c", "new", "app", None, "server");
-        rust["files"] = json!(["main.rs"]);
-        let already_there = module("d", "new", "features", Some("x"), "ui");
-        let errors = check(&proposal(vec![no_files, wrong_file, rust, already_there], vec![]), &["features/x/ui"]);
-        assert!(has(&errors, "names no files"), "{errors:?}");
-        assert!(has(&errors, "missing.ts does not exist"), "{errors:?}");
-        assert!(has(&errors, "not a source file that belongs in the FSD layers"), "{errors:?}");
-        assert!(has(&errors, "already exists"), "{errors:?}");
-    }
-
-    #[test]
-    fn an_interface_needs_a_name_but_not_inputs_or_outputs() {
-        let mut bare = module("a", "new", "features", Some("x"), "ui");
-        bare["interfaces"] = json!([{"name":"Thing","kind":"component","inputs":[],"outputs":[]}]);
-        assert_eq!(check(&proposal(vec![bare], vec![]), &[]), Vec::<String>::new());
+    fn an_interface_needs_a_unique_name_but_not_inputs_or_outputs() {
+        let mut bare = interface("Thing", "component");
+        bare["inputs"] = json!([]);
+        bare["outputs"] = json!([]);
+        assert_eq!(check_interface(bare), NONE);
         let mut bad = module("b", "new", "features", Some("x"), "ui");
-        bad["interfaces"] = json!([{"name":"","kind":"hook","inputs":[],"outputs":[]},{"name":"A","kind":"hook","inputs":[],"outputs":[]},{"name":"A","kind":"hook","inputs":[],"outputs":[]}]);
+        bad["interfaces"] = json!([interface("", "hook"), interface("A", "hook"), interface("A", "hook")]);
         let errors = check(&proposal(vec![bad], vec![]), &[]);
         assert!(has(&errors, "without a name") && has(&errors, "more than once"), "{errors:?}");
-        let unknown_kind = json!({"summary":"s","dependencies":[],"modules":[{"id":"a","name":"a","kind":"new","layer":"shared","slice":null,"segment":"lib","responsibility":"r","behaviors":["b"],"interfaces":[{"name":"x","kind":"service","inputs":[],"outputs":[]}],"files":["a.ts"]}]});
-        assert!(serde_json::from_value::<Proposal>(unknown_kind).is_err());
+    }
+
+    #[test]
+    fn behavior_is_a_condition_and_a_result() {
+        // Something that acts must state its result; the condition may be empty.
+        let mut always = interface("format", "function");
+        always["condition"] = json!("");
+        assert_eq!(check_interface(always), NONE);
+        let mut silent = interface("cancelJob", "function");
+        silent["result"] = json!(" ");
+        assert!(has(&check_interface(silent), "states no result"));
+        // A type states no behavior, but a file of types is still not a module.
+        let mut shape = interface("Job", "type");
+        shape["condition"] = json!("");
+        shape["result"] = json!("");
+        let mut m = module("a", "new", "features", Some("x"), "model");
+        m["interfaces"] = json!([shape, interface("cancelJob", "function")]);
+        assert_eq!(check(&proposal(vec![m], vec![]), &[]), NONE);
+        // Existing modules are only referenced, so their behavior may be left out.
+        let mut used = interface("apiRequest", "function");
+        used["result"] = json!("");
+        let mut api = module("api", "existing", "shared", None, "api");
+        api["interfaces"] = json!([used]);
+        let p = proposal(vec![module("a", "new", "features", Some("x"), "ui"), api], vec![("a", "api")]);
+        assert_eq!(check(&p, &["shared/api"]), NONE);
+    }
+
+    #[test]
+    fn prose_is_limited_in_length_and_to_one_sentence() {
+        let mut m = module("a", "new", "features", Some("x"), "ui");
+        m["name"] = json!("n".repeat(MAX_NAME + 1));
+        m["responsibility"] = json!("Does one thing. And then another thing.");
+        let mut long = interface("cancelJob", "function");
+        long["condition"] = json!("w".repeat(MAX_CONDITION + 1));
+        long["result"] = json!("가".repeat(MAX_RESULT + 1));
+        m["interfaces"] = json!([long]);
+        let mut p = proposal(vec![m], vec![]);
+        p.summary = "s".repeat(MAX_SUMMARY + 1);
+        let errors = check(&p, &[]);
+        for part in ["Module name", "must be one sentence", "condition has", "result has", "The summary has"] {
+            assert!(has(&errors, part), "missing {part:?} in {errors:?}");
+        }
+        // Limits count characters, not bytes: 100 Hangul syllables fit.
+        let mut korean = interface("cancelJob", "function");
+        korean["result"] = json!("가".repeat(MAX_RESULT));
+        assert_eq!(check_interface(korean), NONE);
+    }
+
+    #[test]
+    fn lists_are_limited_in_size() {
+        let mut m = module("a", "new", "features", Some("x"), "ui");
+        m["interfaces"] = Value::Array((0..=MAX_INTERFACES).map(|i| interface(&format!("f{i}"), "function")).collect());
+        m["files"] = Value::Array((0..=MAX_FILES).map(|i| json!(format!("f{i}.ts"))).collect());
+        let errors = check(&proposal(vec![m], vec![]), &[]);
+        assert!(has(&errors, "interfaces; at most") && has(&errors, "files; at most"), "{errors:?}");
+        let mut wide = interface("f", "function");
+        wide["inputs"] = Value::Array((0..=MAX_PORTS).map(|i| json!(format!("a{i}: string"))).collect());
+        assert!(has(&check_interface(wide), "inputs or outputs"));
+    }
+
+    #[test]
+    fn inputs_and_outputs_are_names_and_types_not_descriptions() {
+        let with = |inputs: Value, outputs: Value| {
+            let mut i = interface("f", "function");
+            i["inputs"] = inputs;
+            i["outputs"] = outputs;
+            check_interface(i)
+        };
+        // Accepted: typed names, optional names, and the usual type syntax.
+        assert_eq!(with(json!(["id: string", "target?: string | null", "options: { retry: boolean; times: number }", "onDone: (job: Job) => void"]),
+            json!(["Promise<boolean>", "job: JobView | null", "Record<string, readonly Job[]>", "keyof typeof STATUS", "'queued' | 'running'", "T extends Job ? string : never"])), NONE);
+        // Rejected: descriptions, missing types, prose in any language, unbalanced brackets.
+        assert!(has(&with(json!(["the job id"]), json!([])), "must be written name: Type"));
+        assert!(has(&with(json!(["id"]), json!([])), "must be written name: Type"));
+        assert!(has(&with(json!(["id: 작업 ID 경로 매개변수"]), json!([])), "must be written name: Type"));
+        assert!(has(&with(json!(["id: the id of the job"]), json!([])), "must be written name: Type"));
+        assert!(has(&with(json!([]), json!(["작업 표시 및 취소 제어에 필요한 상태 구조"])), "must be a TypeScript type"));
+        assert!(has(&with(json!([]), json!(["the current job state"])), "must be a TypeScript type"));
+        assert!(has(&with(json!([]), json!(["Promise<boolean"])), "must be a TypeScript type"));
     }
 
     #[test]
     fn a_file_of_types_is_not_a_module() {
         let mut types = module("contract", "new", "features", Some("x"), "model");
-        types["interfaces"] = json!([{"name":"RunContract","kind":"type","inputs":[],"outputs":[]},{"name":"RunResult","kind":"type","inputs":[],"outputs":[]}]);
+        types["interfaces"] = json!([interface("RunContract", "type"), interface("RunResult", "type")]);
         assert!(has(&check(&proposal(vec![types], vec![]), &[]), "so it is not a module"));
         // Types next to something usable are fine: they are part of that module's interface.
         let mut with_types = module("model", "new", "features", Some("x"), "model");
-        with_types["interfaces"] = json!([{"name":"RunContract","kind":"type","inputs":[],"outputs":[]},{"name":"runSentence","kind":"function","inputs":["sentence: string"],"outputs":["RunResult"]}]);
-        assert_eq!(check(&proposal(vec![with_types], vec![]), &[]), Vec::<String>::new());
+        with_types["interfaces"] = json!([interface("RunContract", "type"), interface("runSentence", "function")]);
+        assert_eq!(check(&proposal(vec![with_types], vec![]), &[]), NONE);
     }
 
     #[test]
     fn server_requests_are_interfaces_and_pass_through_shared_api() {
-        let request = json!({"name":"POST /api/jobs/{id}/cancel","kind":"server","inputs":["id"],"outputs":["job"]});
-        let function = json!({"name":"cancelJob","kind":"function","inputs":[],"outputs":[]});
+        let request = interface("POST /api/jobs/{id}/cancel", "server");
         let mut model = module("model", "new", "features", Some("cancel"), "model");
-        model["interfaces"] = json!([function, request]);
+        model["interfaces"] = json!([interface("cancelJob", "function"), request]);
         let api = module("api", "existing", "shared", None, "api");
         let lib = module("lib", "existing", "shared", None, "lib");
         // Directly through shared/api, or indirectly through another module: accepted.
-        assert_eq!(check(&proposal(vec![model.clone(), api.clone()], vec![("model", "api")]), &["shared/api"]), Vec::<String>::new());
+        assert_eq!(check(&proposal(vec![model.clone(), api.clone()], vec![("model", "api")]), &["shared/api"]), NONE);
         let mut ui = module("ui", "new", "features", Some("cancel"), "ui");
-        ui["interfaces"] = json!([{"name":"CancelButton","kind":"component","inputs":[],"outputs":[]}, {"name":"GET /api/jobs/{id}","kind":"server","inputs":[],"outputs":[]}]);
+        ui["interfaces"] = json!([interface("CancelButton", "component"), interface("GET /api/jobs/{id}", "server")]);
         let plain_model = module("model", "new", "features", Some("cancel"), "model");
-        assert_eq!(check(&proposal(vec![ui, plain_model, api.clone()], vec![("ui", "model"), ("model", "api")]), &["shared/api"]), Vec::<String>::new());
+        assert_eq!(check(&proposal(vec![ui, plain_model, api.clone()], vec![("ui", "model"), ("model", "api")]), &["shared/api"]), NONE);
         // Bypassing shared/api: rejected.
         let errors = check(&proposal(vec![model.clone(), lib], vec![("model", "lib")]), &["shared/lib"]);
         assert!(has(&errors, "does not depend, directly or indirectly, on a module in shared/api"), "{errors:?}");
         // A server interface that is not named as a request: rejected.
         let mut misnamed = model;
-        misnamed["interfaces"] = json!([{"name":"cancelJob","kind":"function","inputs":[],"outputs":[]},{"name":"cancel the job","kind":"server","inputs":[],"outputs":[]}]);
+        misnamed["interfaces"] = json!([interface("cancelJob", "function"), interface("cancel the job", "server")]);
         assert!(has(&check(&proposal(vec![misnamed, api], vec![("model", "api")]), &["shared/api"]), "must be named METHOD /path"));
     }
 

@@ -39,10 +39,6 @@ export function NodeCard({
     .filter(Boolean)
     .join(' ');
   const hidden = node.interfaces.length - VISIBLE_INTERFACES;
-  const footer = [
-    node.behaviors?.length ? `동작 ${node.behaviors.length}` : '',
-    requestCount > 0 ? `요청 ${requestCount}` : '',
-  ].filter(Boolean);
   return (
     <article
       className={className}
@@ -73,7 +69,15 @@ export function NodeCard({
             <span
               key={item.name}
               className={`io-pill output kind-${item.kind}`}
-              title={`${INTERFACE_KIND_LABELS[item.kind]} · ${item.name}\n입력: ${item.inputs.join(', ') || '없음'}\n출력: ${item.outputs.join(', ') || '없음'}`}
+              title={[
+                `${INTERFACE_KIND_LABELS[item.kind]} · ${item.name}`,
+                item.condition && `조건: ${item.condition}`,
+                item.result && `결과: ${item.result}`,
+                `입력: ${item.inputs.join(', ') || '없음'}`,
+                `출력: ${item.outputs.join(', ') || '없음'}`,
+              ]
+                .filter(Boolean)
+                .join('\n')}
             >
               {item.kind === 'server' ? '⇄ ' : ''}
               {item.name}
@@ -83,7 +87,7 @@ export function NodeCard({
         </div>
       </div>
       <div className="node-bottom">
-        <span title={(node.behaviors ?? []).join('\n')}>{footer.join(' · ')}</span>
+        <span>{requestCount > 0 ? `요청 ${requestCount}` : ''}</span>
         <button
           className="textbtn link"
           onClick={(ev) => {

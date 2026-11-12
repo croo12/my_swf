@@ -30,6 +30,8 @@ interface InterfaceRow {
   key: number;
   name: string;
   kind: InterfaceKind;
+  condition: string;
+  result: string;
   inputs: string;
   outputs: string;
 }
@@ -49,13 +51,14 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
   const [kind, setKind] = useState<ModuleKind>(kindOf(node));
   const [path, setPath] = useState(node.path);
   const [description, setDescription] = useState(node.description);
-  const [behaviors, setBehaviors] = useState((node.behaviors ?? []).join('\n'));
   const [files, setFiles] = useState((node.files ?? []).join('\n'));
   const [interfaces, setInterfaces] = useState<InterfaceRow[]>(() =>
     node.interfaces.map((item, key) => ({
       key,
       name: item.name,
       kind: item.kind,
+      condition: item.condition,
+      result: item.result,
       inputs: item.inputs.join('\n'),
       outputs: item.outputs.join('\n'),
     })),
@@ -70,7 +73,10 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
   const patchInterface = (key: number, change: Partial<InterfaceRow>) =>
     setInterfaces((rows) => rows.map((row) => (row.key === key ? { ...row, ...change } : row)));
   const addInterface = () => {
-    setInterfaces((rows) => [...rows, { key: nextKey, name: '', kind: 'function', inputs: '', outputs: '' }]);
+    setInterfaces((rows) => [
+      ...rows,
+      { key: nextKey, name: '', kind: 'function', condition: '', result: '', inputs: '', outputs: '' },
+    ]);
     setNextKey(nextKey + 1);
   };
 
@@ -85,13 +91,14 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
       kind,
       path: cleaned,
       description: description.trim(),
-      behaviors: lines(behaviors),
       files: lines(files),
       interfaces: interfaces
         .filter((row) => row.name.trim())
         .map((row) => ({
           name: row.name.trim(),
           kind: row.kind,
+          condition: row.condition.trim(),
+          result: row.result.trim(),
           inputs: lines(row.inputs),
           outputs: lines(row.outputs),
         })),
@@ -155,12 +162,8 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
           </div>
         </div>
         <div className="field">
-          <label htmlFor="editDesc">책임</label>
+          <label htmlFor="editDesc">책임 · 한 문장</label>
           <textarea id="editDesc" rows={2} value={description} onChange={(ev) => setDescription(ev.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="editBehaviors">동작 · 한 줄에 하나씩</label>
-          <textarea id="editBehaviors" rows={3} value={behaviors} onChange={(ev) => setBehaviors(ev.target.value)} />
         </div>
 
         <div className="field">
@@ -195,12 +198,24 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
                   삭제
                 </button>
               </div>
+              <input
+                aria-label="조건"
+                placeholder="조건 · 언제 (항상이면 비움)"
+                value={row.condition}
+                onChange={(ev) => patchInterface(row.key, { condition: ev.target.value })}
+              />
+              <input
+                aria-label="결과"
+                placeholder="결과 · 그러면 무엇이 일어나는가"
+                value={row.result}
+                onChange={(ev) => patchInterface(row.key, { result: ev.target.value })}
+              />
               <div className="edit-card-io">
                 <textarea
                   aria-label="입력"
                   rows={2}
                   spellCheck={false}
-                  placeholder="입력 · 한 줄에 하나 (없으면 비움)"
+                  placeholder="입력 · id: string"
                   value={row.inputs}
                   onChange={(ev) => patchInterface(row.key, { inputs: ev.target.value })}
                 />
@@ -208,7 +223,7 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
                   aria-label="출력"
                   rows={2}
                   spellCheck={false}
-                  placeholder="출력 · 한 줄에 하나 (없으면 비움)"
+                  placeholder="출력 · Promise<boolean>"
                   value={row.outputs}
                   onChange={(ev) => patchInterface(row.key, { outputs: ev.target.value })}
                 />
@@ -219,8 +234,8 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
             ＋ 인터페이스
           </button>
           <div className="help">
-            서버 요청은 이름을 "POST /api/..." 형식으로 적습니다. 서버 요청이 있는 모듈은 shared/api 모듈을 거쳐야
-            합니다.
+            동작은 인터페이스마다 조건과 결과로 적고, 입력·출력은 한 줄에 하나씩 타입으로 적습니다. 서버 요청은 이름을
+            "POST /api/..." 형식으로 적습니다. 서버 요청이 있는 모듈은 shared/api 모듈을 거쳐야 합니다.
           </div>
         </div>
 

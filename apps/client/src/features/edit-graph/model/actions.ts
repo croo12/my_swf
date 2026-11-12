@@ -25,7 +25,6 @@ export interface NodeDraft {
   kind: ModuleKind;
   path: string;
   description: string;
-  behaviors: string[];
   files: string[];
   interfaces: ModuleInterface[];
 }

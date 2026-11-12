@@ -31,26 +31,29 @@ macOS / Windows / Android            Mac Studio
 
 ## Plan document
 
-A plan holds the modules to build or change and where each is placed. `nodes[]`: id, name, kind (`new` | `modify` | `existing`), path (layer/slice/segment, or layer/segment in app and shared), description (responsibility), behaviors, `interfaces[]` (name, kind, inputs, outputs), files. `edges[]`: id, from, to, type. Also `requests[]`, `version`, and an optional `summary`. Positions are not stored; the client lays the graph out. Before saving, the server checks unique node ids, FSD paths, interface names and array types, and edge endpoints.
+A plan holds the modules to build or change and where each is placed. `nodes[]`: id, name, kind (`new` | `modify` | `existing`), path (layer/slice/segment, or layer/segment in app and shared), description (responsibility, one sentence), `interfaces[]` (name, kind, condition, result, inputs, outputs), files. `edges[]`: id, from, to, type. Also `requests[]`, `version`, and an optional `summary`. Positions are not stored; the client lays the graph out. Before saving, the server checks unique node ids, FSD paths, interface names and array types, and edge endpoints.
 
 ## Planning job: structured answer, static validation
 
 The AI is not trusted to follow instructions about shape or rules.
 
-1. **Schema.** Codex runs as `codex exec --output-schema`, so it can only answer in the shape of `planner::output_schema()`: `summary`, `modules[]` (id, name, kind, layer, slice, segment, responsibility, behaviors, `interfaces[]` with name/kind/inputs/outputs, files). An interface kind is component, hook, function, store, constant or type (offered to other modules), or server (a request the module sends, named `METHOD /path`) and `dependencies[]` (from, to). `layer` is an enum of the six FSD layers, so code outside them cannot be expressed.
+1. **Schema.** Codex runs as `codex exec --output-schema`, so it can only answer in the shape of `planner::output_schema()`: `summary`, `modules[]` (id, name, kind, layer, slice, segment, responsibility, `interfaces[]` with name/kind/condition/result/inputs/outputs, files). An interface kind is component, hook, function, store, constant or type (offered to other modules), or server (a request the module sends, named `METHOD /path`) and `dependencies[]` (from, to). `layer` is an enum of the six FSD layers, so code outside them cannot be expressed.
 2. **Typed parse.** The answer is deserialized into Rust types that reject unknown fields and unknown enum values.
 3. **Static rules** (`planner::validate`), checked against the repository scan and the disk:
    - Every module has an id (unique), a name, a responsibility, and at least one file.
    - Sliced layers need a slice; app and shared must not have one. Slice, segment and file names are clean relative paths.
    - `modify` and `existing` modules are at a placement the scanner found, and every file they name exists there. `new` modules name files that do not exist yet. Only client source file types are accepted.
-   - `new` and `modify` modules state at least one behavior and have at least one interface. An interface needs a unique name and a kind; its inputs and outputs may be empty.
+   - `new` and `modify` modules have at least one interface. An interface needs a unique name and a kind; its inputs and outputs may be empty.
+   - Behavior is stated per interface as a `condition` (may be empty) and one `result`, the two halves of an EARS requirement. Every component, hook, function, store and server interface of a `new` or `modify` module states its result. There is no module-level behavior list.
+   - Inputs are written `name: Type` and outputs as a type or `name: Type`, in TypeScript. The check is not a parser: it accepts only ASCII, requires balanced brackets, and rejects two plain words in a row unless one is a type keyword, which keeps descriptions out.
+   - Free text and lists are limited: summary 300 characters; module name 40; responsibility 100 and one sentence; `condition` 80 and `result` 100, one sentence each; 12 interfaces and 12 files per module; 8 inputs and 8 outputs per interface, 120 characters each.
    - A module offers something other than types to other modules. A file that only declares types is not a module and is rejected; its types belong in the interfaces of the module that uses them.
    - A server interface is named `METHOD /path`. A module with a server interface is placed in `shared/api` or reaches a `shared/api` module through its dependencies.
    - Dependencies refer to modules in the plan, are not duplicated, do not start at an `existing` module, and form no cycle. A dependency points to a lower layer or stays inside one slice.
    - Every `existing` module is depended on by another module.
-4. **Rejection.** Any violation fails the job with the full list (also written to `rejected.json`). Only a proposal with no violations becomes `proposed-plan.json`.
+4. **Rejection and retry.** A rejected answer is sent back to Codex with the full list of violations, up to three attempts in total. If the last attempt is still rejected, the job fails with that list. Only an answer with no violations becomes `proposed-plan.json`.
 
-Each job keeps its files in `data/jobs/<uuid>/`: `prompt.txt`, `schema.json`, `result.json` (raw answer), `exit.json`, and `proposed-plan.json` or `rejected.json`.
+Each job keeps its files in `data/jobs/<uuid>/`: `prompt.txt`, `schema.json`, `result-<n>.json` (raw answer of each attempt), `rejected-<n>.json` (its violations), `exit.json`, and `proposed-plan.json` when an attempt passed.
 
 ## Trust boundary
 
