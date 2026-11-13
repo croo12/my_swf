@@ -79,6 +79,9 @@ fn validate_plan(plan: &Value) -> Result<(), ApiError> {
         }
     }
     for e in edges {
+        if e.get("uses").is_some_and(|u|!u.as_array().is_some_and(|a|a.iter().all(Value::is_string))) {
+            return Err(err(StatusCode::BAD_REQUEST,"Edge uses must be a list of interface names"));
+        }
         if !ids.contains(e.get("from").and_then(Value::as_str).unwrap_or("")) ||
             !ids.contains(e.get("to").and_then(Value::as_str).unwrap_or("")) {
             return Err(err(StatusCode::BAD_REQUEST,"Edge references unknown node"));
@@ -94,9 +97,23 @@ async fn read_json(path:&Path)->Result<Value, ApiError> {
     let bytes=fs::read(path).await.map_err(|e|err(StatusCode::NOT_FOUND,e))?;
     serde_json::from_slice(&bytes).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,e))
 }
+/// What the repository's working tree is on right now. Planning reads the working tree as it is:
+/// the checked-out branch, its commit, and any uncommitted changes. Nothing is fetched or pulled.
+async fn git_state(repo:&Path)->Value {
+    async fn git(repo:&Path,args:&[&str])->Option<String> {
+        let run=Command::new("git").arg("-C").arg(repo).args(args).kill_on_drop(true).output();
+        let output=tokio::time::timeout(Duration::from_secs(10),run).await.ok()?.ok()?;
+        output.status.success().then(||String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    }
+    let Some(commit)=git(repo,&["rev-parse","--short","HEAD"]).await else {return Value::Null;};
+    let branch=git(repo,&["rev-parse","--abbrev-ref","HEAD"]).await.unwrap_or_default();
+    let committed_at=git(repo,&["log","-1","--format=%cI"]).await.unwrap_or_default();
+    let changed=git(repo,&["status","--porcelain"]).await.map(|out|out.lines().count()).unwrap_or(0);
+    json!({"branch":branch,"commit":commit,"committedAt":committed_at,"uncommittedFiles":changed})
+}
 async fn status(State(s):State<Arc<AppState>>,headers:HeaderMap)->ApiResult {
     auth(&headers,&s)?;
-    Ok(Json(json!({"ok":true,"stage":"planning","version":"0.2","repository":s.repository.display().to_string(),"herdr":"enabled"})))
+    Ok(Json(json!({"ok":true,"stage":"planning","version":env!("CARGO_PKG_VERSION"),"repository":s.repository.display().to_string(),"git":git_state(&s.repository).await,"herdr":"enabled"})))
 }
 async fn get_plan(State(s):State<Arc<AppState>>,headers:HeaderMap)->ApiResult {
     auth(&headers,&s)?;
@@ -176,6 +193,8 @@ Your answer is checked by a program and rejected as a whole if any of these is n
 - An interface is listed by one module only. A module that only re-exports another module (its interfaces have the same inputs and outputs as those of a module it imports) is not a module.
 - An output states a type; it never just repeats the interface name.
 - A request to the server is an interface of kind "server", named METHOD /path. A module with such an interface is placed in shared/api or depends, directly or indirectly, on a module in shared/api.
+- A dependency names, in "uses", at least one interface of the module it imports from, by the exact name listed there. It cannot use a server request of another module.
+- An "existing" module lists only the interfaces that some dependency uses.
 - A dependency points to a lower layer, or stays inside one slice. There are no cycles, no duplicates, and no dependencies that start at an "existing" module.
 - The length and size limits stated in the answer schema hold.
 
@@ -235,7 +254,13 @@ async fn execute_job(s:Arc<AppState>,id:String,instruction:String) {
     let label=format!("factory-{}",&id[..8]);
     let result:Result<Value,String>=async {
         // 1. Facts from the repository: where the FSD layers are and which modules exist.
-        update_job(&s,&id,"running","저장소 구조 확인 중".into(),None,None).await;
+        let git=git_state(&s.repository).await;
+        let based_on=match (git.get("branch").and_then(Value::as_str),git.get("commit").and_then(Value::as_str)) {
+            (Some(branch),Some(commit)) => format!("{branch} @ {commit}{}",if git.get("uncommittedFiles").and_then(Value::as_u64).unwrap_or(0)>0 {" + 미커밋 변경"} else {""}),
+            _ => "Git 정보 없음".to_owned(),
+        };
+        let _=write_json(&dir.join("based-on.json"),&git).await;
+        update_job(&s,&id,"running",format!("저장소 구조 확인 중 · 기준: {based_on}"),None,None).await;
         let repo=s.repository.clone();
         let scan=tokio::task::spawn_blocking(move||graph::scan(&repo)).await.map_err(|e|e.to_string())??;
         let existing:Vec<String>=scan.get("nodes").and_then(Value::as_array).into_iter().flatten()
@@ -269,7 +294,7 @@ async fn execute_job(s:Arc<AppState>,id:String,instruction:String) {
             let _=fs::remove_file(&exit_file).await;
             let _=fs::remove_file(dir.join("result.json")).await;
             run_agent_in_pane(&s,&dir,&pane).await?;
-            update_job(&s,&id,"running",format!("Codex가 계획을 만드는 중 · 시도 {attempt}/{MAX_ATTEMPTS} (Herdr {label})"),Some("codex".into()),Some(pane.clone())).await;
+            update_job(&s,&id,"running",format!("Codex가 계획을 만드는 중 · 시도 {attempt}/{MAX_ATTEMPTS} · 기준: {based_on} (Herdr {label})"),Some("codex".into()),Some(pane.clone())).await;
             let started=std::time::Instant::now();
             while !exit_file.is_file() {
                 if started.elapsed()>AGENT_TIMEOUT {return Err(format!("Codex did not finish within {} minutes.",AGENT_TIMEOUT.as_secs()/60));}
@@ -298,7 +323,7 @@ async fn execute_job(s:Arc<AppState>,id:String,instruction:String) {
     }.await;
     match result {
         Ok(plan) => match write_json(&dir.join("proposed-plan.json"),&plan).await {
-            Ok(()) => update_job(&s,&id,"completed","계획 제안이 검증을 통과했습니다. 확인 후 적용하세요.".into(),None,None).await,
+            Ok(()) => update_job(&s,&id,"completed","계획 제안이 검증을 통과했습니다. 확인 후 적용하세요.".to_owned(),None,None).await,
             Err(e) => update_job(&s,&id,"failed",e.1,None,None).await,
         },
         Err(error) => update_job(&s,&id,"failed",error,None,None).await,

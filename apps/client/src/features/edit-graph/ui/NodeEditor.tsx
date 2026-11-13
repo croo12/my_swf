@@ -259,6 +259,7 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
               <div key={e.id} className="edge-row">
                 <span>
                   {e.from === node.id ? '→' : '←'} {e.type} · {target ? moduleNameOf(target) : '?'}
+                  {e.uses?.length ? <small className="edge-row-uses">{e.uses.join(', ')}</small> : null}
                 </span>
                 <button className="textbtn" onClick={() => removeEdge(e.id)}>
                   삭제

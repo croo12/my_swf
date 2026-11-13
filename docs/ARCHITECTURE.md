@@ -31,13 +31,13 @@ macOS / Windows / Android            Mac Studio
 
 ## Plan document
 
-A plan holds the modules to build or change and where each is placed. `nodes[]`: id, name, kind (`new` | `modify` | `existing`), path (layer/slice/segment, or layer/segment in app and shared), description (responsibility, one sentence), `interfaces[]` (name, kind, condition, result, inputs, outputs), files. `edges[]`: id, from, to, type. Also `requests[]`, `version`, and an optional `summary`. Positions are not stored; the client lays the graph out. Before saving, the server checks unique node ids, FSD paths, interface names and array types, and edge endpoints.
+A plan holds the modules to build or change and where each is placed. `nodes[]`: id, name, kind (`new` | `modify` | `existing`), path (layer/slice/segment, or layer/segment in app and shared), description (responsibility, one sentence), `interfaces[]` (name, kind, condition, result, inputs, outputs), files. `edges[]`: id, from, to, type, uses (the interfaces of `to` that `from` uses). Also `requests[]`, `version`, and an optional `summary`. Positions are not stored; the client lays the graph out. Before saving, the server checks unique node ids, FSD paths, interface names and array types, and edge endpoints.
 
 ## Planning job: structured answer, static validation
 
 The AI is not trusted to follow instructions about shape or rules.
 
-1. **Schema.** Codex runs as `codex exec --output-schema`, so it can only answer in the shape of `planner::output_schema()`: `summary`, `modules[]` (id, name, kind, layer, slice, segment, responsibility, `interfaces[]` with name/kind/condition/result/inputs/outputs, files). An interface kind is component, hook, function, store, constant or type (offered to other modules), or server (a request the module sends, named `METHOD /path`) and `dependencies[]` (from, to). `layer` is an enum of the six FSD layers, so code outside them cannot be expressed.
+1. **Schema.** Codex runs as `codex exec --output-schema`, so it can only answer in the shape of `planner::output_schema()`: `summary`, `modules[]` (id, name, kind, layer, slice, segment, responsibility, `interfaces[]` with name/kind/condition/result/inputs/outputs, files). An interface kind is component, hook, function, store, constant or type (offered to other modules), or server (a request the module sends, named `METHOD /path`) and `dependencies[]` (from, to, uses). `layer` is an enum of the six FSD layers, so code outside them cannot be expressed.
 2. **Typed parse.** The answer is deserialized into Rust types that reject unknown fields and unknown enum values.
 3. **Static rules** (`planner::validate`), checked against the repository scan and the disk:
    - Every module has an id (unique), a name, a responsibility, and at least one file.
@@ -51,6 +51,7 @@ The AI is not trusted to follow instructions about shape or rules.
    - An interface is listed by one planned module only. A module whose every acting interface has exactly the inputs and outputs of an interface of a module it imports from is a pass-through and is rejected: a re-export is the slice index, not a module.
    - An output that only repeats the interface name (`Name` or `typeof Name`) is rejected.
    - A server interface is named `METHOD /path`. A module with a server interface is placed in `shared/api` or reaches a `shared/api` module through its dependencies.
+   - A dependency names at least one interface it uses, each by a name the target module lists, without duplicates, and never a server request. An `existing` module lists only interfaces that some dependency uses.
    - Dependencies refer to modules in the plan, are not duplicated, do not start at an `existing` module, and form no cycle. A dependency points to a lower layer or stays inside one slice.
    - Every `existing` module is depended on by another module.
 4. **Rejection and retry.** A rejected answer is sent back to Codex with the full list of violations, up to three attempts in total. If the last attempt is still rejected, the job fails with that list. Only an answer with no violations becomes `proposed-plan.json`.

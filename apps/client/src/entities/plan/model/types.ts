@@ -69,6 +69,8 @@ export interface PlanEdge {
   from: string;
   to: string;
   type: string;
+  /** Names of the interfaces of `to` that `from` uses. */
+  uses?: string[];
 }
 
 export interface PlanRequest {

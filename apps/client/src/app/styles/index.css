@@ -1955,3 +1955,30 @@ body {
 .field .edit-card-head select.kind-select {
   width: 96px;
 }
+
+/* What a relation uses, shown on the relations of the selected module. */
+.edges .edge-uses rect {
+  fill: #241f45;
+  stroke: #7c6ee0;
+  stroke-width: 1;
+}
+.edges .edge-uses text {
+  fill: #dcd5ff;
+  font-size: 11px;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.edge-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: normal;
+}
+.edge-row-uses {
+  color: #8fa1bc;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.server-chip {
+  max-width: 380px;
+}

@@ -3,6 +3,19 @@ import { isInvalidEdge } from '../model/rules';
 import type { PlanEdge, PlanNode } from '../model/types';
 
 const CORNER = 8;
+const LABEL_CHARS = 34;
+const LABEL_OFFSET = 26;
+
+/** Where a label sits: just before the arrowhead, so the labels of lines that run side by side do not collide. */
+function labelPoint(points: Point[]): Point | null {
+  if (points.length < 2) return null;
+  const [before, end] = [points.at(-2)!, points.at(-1)!];
+  const length = Math.hypot(end.x - before.x, end.y - before.y) || 1;
+  const back = Math.min(LABEL_OFFSET, length / 2);
+  return { x: end.x - ((end.x - before.x) / length) * back, y: end.y - ((end.y - before.y) / length) * back };
+}
+
+const shorten = (text: string) => (text.length > LABEL_CHARS ? text.slice(0, LABEL_CHARS - 1) + '…' : text);
 
 /** A path along the points with rounded corners. The routes are orthogonal, so corners are right angles. */
 function roundedPath(points: Point[]): string {
@@ -64,8 +77,29 @@ export function Edges({ routes, edges, nodes, width, height, focusId }: EdgesPro
           .filter(Boolean)
           .join(' ');
         const marker = invalid ? 'arrowDanger' : toServer ? 'arrowServer' : active ? 'arrowActive' : 'arrow';
+        // What the relation is for, shown only for the relations of the selected module.
+        const uses = active ? (edge?.uses ?? []) : [];
+        const at = uses.length > 0 ? labelPoint(route.points) : null;
+        const label = shorten(uses.join(', '));
         return (
-          <path key={route.id} className={className} d={roundedPath(route.points)} markerEnd={`url(#${marker})`} />
+          <g key={route.id}>
+            <path className={className} d={roundedPath(route.points)} markerEnd={`url(#${marker})`} />
+            {at && (
+              <g className="edge-uses">
+                <title>{uses.join('\n')}</title>
+                <rect
+                  x={at.x - label.length * 3.4 - 8}
+                  y={at.y - 10}
+                  width={label.length * 6.8 + 16}
+                  height="20"
+                  rx="6"
+                />
+                <text x={at.x} y={at.y + 4} textAnchor="middle">
+                  {label}
+                </text>
+              </g>
+            )}
+          </g>
         );
       })}
     </svg>

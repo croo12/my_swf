@@ -102,6 +102,7 @@ export function normalizeImported(data: unknown): Plan {
       from: String(e.from),
       to: String(e.to),
       type: String(e.type ?? 'uses'),
+      uses: stringArray(e.uses),
     }));
   return {
     version: Number(doc.version || 1),

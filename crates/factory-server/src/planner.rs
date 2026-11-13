@@ -140,6 +140,8 @@ pub struct Dependency {
     pub from: String,
     /// The module it depends on.
     pub to: String,
+    /// Names of the interfaces of `to` that `from` uses. This is what the dependency is for.
+    pub uses: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -185,10 +187,11 @@ pub fn output_schema() -> Value {
                 }
             }},
             "dependencies":{"type":"array","items":{
-                "type":"object","additionalProperties":false,"required":["from","to"],
+                "type":"object","additionalProperties":false,"required":["from","to","uses"],
                 "properties":{
                     "from":{"type":"string","description":"id of the module that imports."},
-                    "to":{"type":"string","description":"id of the module it imports from."}
+                    "to":{"type":"string","description":"id of the module it imports from."},
+                    "uses":{"type":"array","items":{"type":"string"},"description":"Names of the interfaces of the imported module that the importing module uses. At least one."}
                 }
             }}
         }
@@ -367,6 +370,8 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
 
     let mut seen = HashSet::new();
     let mut depended_on: HashSet<&str> = HashSet::new();
+    // (module id, interface name) pairs that some dependency uses.
+    let mut used: HashSet<(&str, &str)> = HashSet::new();
     let mut graph: HashMap<&str, Vec<&str>> = HashMap::new();
     for d in &proposal.dependencies {
         let (Some(from), Some(to)) = (by_id.get(d.from.as_str()), by_id.get(d.to.as_str())) else {
@@ -381,11 +386,33 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
         if !(from.layer.rank() < to.layer.rank() || same_slice) {
             errors.push(format!("\"{}\" ({}) may not import \"{}\" ({}): imports go to a lower layer or stay inside one slice.", from.name, from.path(), to.name, to.path()));
         }
+        // A dependency exists for the interfaces it uses, and those must be interfaces the target
+        // really offers. Server requests face the server and cannot be used by another module.
+        if d.uses.is_empty() { errors.push(format!("Dependency \"{}\" -> \"{}\" names no interface it uses.", from.name, to.name)); }
+        let mut named = HashSet::new();
+        for name in &d.uses {
+            if !named.insert(name.as_str()) { errors.push(format!("Dependency \"{}\" -> \"{}\" lists \"{name}\" more than once.", from.name, to.name)); continue; }
+            match to.interfaces.iter().find(|i| &i.name == name) {
+                None => errors.push(format!("Dependency \"{}\" -> \"{}\" uses \"{name}\", which \"{}\" does not offer.", from.name, to.name, to.name)),
+                Some(i) if i.kind == InterfaceKind::Server => errors.push(format!("Dependency \"{}\" -> \"{}\" uses the server request \"{name}\"; a module can only use what another module offers.", from.name, to.name)),
+                Some(_) => { used.insert((d.to.as_str(), name.as_str())); }
+            }
+        }
         depended_on.insert(d.to.as_str());
         graph.entry(d.from.as_str()).or_default().push(d.to.as_str());
     }
     for m in modules.iter().filter(|m| m.kind == Kind::Existing) {
         if !depended_on.contains(m.id.as_str()) { errors.push(format!("Existing module \"{}\" is in the plan but nothing depends on it.", m.name)); }
+    }
+    // An existing module is in the plan only for what the planned work uses, so every interface it
+    // lists must be used by a dependency.
+    for m in modules.iter().filter(|m| m.kind == Kind::Existing) {
+        // Server requests of an existing module are its own business with the server.
+        for interface in m.interfaces.iter().filter(|i| i.kind != InterfaceKind::Server) {
+            if !used.contains(&(m.id.as_str(), interface.name.as_str())) {
+                errors.push(format!("Existing module \"{}\" lists \"{}\", which no dependency uses. List only the interfaces that are used.", m.name, interface.name));
+            }
+        }
     }
     // An interface belongs to one module; a second module that lists it is re-exporting it.
     let planned: Vec<&Module> = modules.iter().filter(|m| m.kind != Kind::Existing).collect();
@@ -466,7 +493,7 @@ pub fn to_plan(proposal: &Proposal) -> Value {
         "files":m.files
     })).collect();
     let edges: Vec<Value> = proposal.dependencies.iter().enumerate().map(|(i, d)| json!({
-        "id":format!("dep-{}",i + 1),"from":d.from,"to":d.to,"type":"imports"
+        "id":format!("dep-{}",i + 1),"from":d.from,"to":d.to,"type":"imports","uses":d.uses
     })).collect();
     json!({"schemaVersion":"0.3","version":1,"summary":proposal.summary,"nodes":nodes,"edges":edges,"requests":[]})
 }
@@ -485,7 +512,13 @@ mod tests {
             "interfaces":[interface(&format!("run_{id}"), "function")],"files":["a.ts"]})
     }
     fn proposal(modules: Vec<Value>, dependencies: Vec<(&str, &str)>) -> Proposal {
-        let deps: Vec<Value> = dependencies.into_iter().map(|(from, to)| json!({"from":from,"to":to})).collect();
+        // By default a dependency uses every interface its target lists.
+        let deps: Vec<Value> = dependencies.into_iter().map(|(from, to)| {
+            let uses: Vec<Value> = modules.iter().filter(|m| m["id"] == to)
+                .flat_map(|m| m["interfaces"].as_array().cloned().unwrap_or_default())
+                .filter(|i| i["kind"] != "server").map(|i| i["name"].clone()).collect();
+            json!({"from":from,"to":to,"uses":uses})
+        }).collect();
         serde_json::from_value(json!({"summary":"s","modules":modules,"dependencies":deps})).expect("fixture parses")
     }
     /// Validates against a fake repository: `paths` are placements, and every placement holds a.ts.
@@ -750,6 +783,32 @@ mod tests {
         let mut misnamed = model;
         misnamed["interfaces"] = json!([interface("cancelJob", "function"), interface("cancel the job", "server")]);
         assert!(has(&check(&proposal(vec![misnamed, api], vec![("model", "api")]), &["shared/api"]), "must be named METHOD /path"));
+    }
+
+    #[test]
+    fn a_dependency_names_the_interfaces_it_uses() {
+        let mut api = module("api", "existing", "shared", None, "api");
+        api["interfaces"] = json!([interface("apiRequest", "function"), interface("errorMessage", "function"), interface("GET /api/status", "server")]);
+        let model = module("model", "new", "features", Some("x"), "model");
+        let with = |uses: Value| {
+            let mut p: Value = json!({"summary":"s","modules":[model.clone(), api.clone()],"dependencies":[{"from":"model","to":"api","uses":uses}]});
+            // errorMessage is only listed when the case under test uses it.
+            if !p["dependencies"][0]["uses"].as_array().is_some_and(|u| u.contains(&json!("errorMessage"))) {
+                p["modules"][1]["interfaces"] = json!([interface("apiRequest", "function"), interface("GET /api/status", "server")]);
+            }
+            check(&serde_json::from_value(p).expect("fixture parses"), &["shared/api"])
+        };
+        assert_eq!(with(json!(["apiRequest", "errorMessage"])), NONE);
+        assert!(has(&with(json!([])), "names no interface it uses"));
+        assert!(has(&with(json!(["apiRequest", "apiRequest"])), "more than once"));
+        assert!(has(&with(json!(["apiRequest", "fetchEverything"])), "does not offer"));
+        assert!(has(&with(json!(["apiRequest", "GET /api/status"])), "uses the server request"));
+        // An existing module may list only what is used.
+        let p = json!({"summary":"s","modules":[model, module("api", "existing", "shared", None, "api")],"dependencies":[{"from":"model","to":"api","uses":["run_api"]}]});
+        let mut extra = p.clone();
+        extra["modules"][1]["interfaces"] = json!([interface("run_api", "function"), interface("unusedHelper", "function")]);
+        assert_eq!(check(&serde_json::from_value(p).expect("fixture parses"), &["shared/api"]), NONE);
+        assert!(has(&check(&serde_json::from_value(extra).expect("fixture parses"), &["shared/api"]), "which no dependency uses"));
     }
 
     #[test]

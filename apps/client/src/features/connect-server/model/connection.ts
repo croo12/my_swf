@@ -3,9 +3,19 @@ import { apiRequest, errorMessage, isAllowedServerUrl, restoreToken, saveConnect
 import { createStore } from '@/shared/lib';
 import { notify } from '@/shared/ui/toast';
 
+/** What the server's repository is checked out on. Planning reads that working tree as it is. */
+export interface GitState {
+  branch: string;
+  commit: string;
+  committedAt: string;
+  uncommittedFiles: number;
+}
+
 export interface ServerStatus {
   text: string;
   color?: string;
+  /** Longer explanation shown as a tooltip. */
+  detail?: string;
 }
 
 export const serverStatusStore = createStore<ServerStatus>({ text: '● 오프라인 UI' });
@@ -17,10 +27,24 @@ export const closeConnectionDialog = () => connectionDialogStore.set(false);
 /** Asks the server for its status and updates the indicator. Resolves to whether the server answered. */
 export async function checkConnection(): Promise<boolean> {
   try {
-    const data = await apiRequest<{ repository?: string }>('/api/status');
+    const data = await apiRequest<{ repository?: string; git?: GitState | null; version?: string }>('/api/status');
+    const name = data.repository?.split(/[\\/]/).pop() || '온라인';
+    const git = data.git ?? null;
+    const based = git ? ` · ${git.branch} @ ${git.commit}${git.uncommittedFiles > 0 ? ' +변경' : ''}` : '';
     serverStatusStore.set({
-      text: '● Factory 연결 · ' + (data.repository?.split(/[\\/]/).pop() || '온라인'),
+      text: `● ${name}${based}`,
       color: '#4ed2aa',
+      detail: git
+        ? [
+            `계획은 서버의 이 작업 폴더를 그대로 읽습니다 (fetch·pull 하지 않음).`,
+            `브랜치: ${git.branch}`,
+            `커밋: ${git.commit} (${new Date(git.committedAt).toLocaleString()})`,
+            git.uncommittedFiles > 0 ? `커밋하지 않은 변경: 파일 ${git.uncommittedFiles}개` : '커밋하지 않은 변경 없음',
+            data.version ? `서버 버전: ${data.version}` : '',
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : undefined,
     });
     return true;
   } catch {

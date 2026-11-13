@@ -88,7 +88,7 @@ export function WorkbenchHeader() {
         <button
           className="server-chip"
           style={{ color: server.color }}
-          title="서버 연결 설정"
+          title={server.detail ?? '서버 연결 설정'}
           onClick={openConnectionDialog}
         >
           {server.text}
