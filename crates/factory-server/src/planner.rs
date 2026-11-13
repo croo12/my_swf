@@ -82,9 +82,9 @@ impl InterfaceKind {
             InterfaceKind::Store => "store", InterfaceKind::Constant => "constant", InterfaceKind::Type => "type", InterfaceKind::Server => "server",
         }
     }
-    /// Something other modules can use at run time. A type only describes a shape, and a server
-    /// request faces the server, so neither makes a module on its own.
-    fn is_offered_to_modules(self) -> bool { !matches!(self, InterfaceKind::Type | InterfaceKind::Server) }
+    /// Something that does work when another module uses it. A type describes a shape, a constant
+    /// is a value, and a server request faces the server; none of them makes a module on its own.
+    fn acts(self) -> bool { matches!(self, InterfaceKind::Component | InterfaceKind::Hook | InterfaceKind::Function | InterfaceKind::Store) }
 }
 
 /// One point where a module meets the outside: something it offers to other modules, or a
@@ -258,6 +258,13 @@ fn is_one_sentence(text: &str) -> bool {
 
 fn length(text: &str) -> usize { text.trim().chars().count() }
 
+/// Inputs or outputs with whitespace removed and in a fixed order, for comparing two signatures.
+fn normalized(entries: &[String]) -> Vec<String> {
+    let mut entries: Vec<String> = entries.iter().map(|e| e.split_whitespace().collect()).collect();
+    entries.sort();
+    entries
+}
+
 fn is_clean_name(part: &str) -> bool {
     !part.is_empty() && part != "." && part != ".." && part.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'))
 }
@@ -338,14 +345,19 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
                 else if !is_typed_name(input) { errors.push(format!("{at}: input \"{input}\" must be written name: Type with a TypeScript type, for example id: string.")); }
             }
             for output in &interface.outputs {
+                let restated = output.trim() == interface.name.trim() || output.trim() == format!("typeof {}", interface.name.trim());
+                if restated { errors.push(format!("{at}: output \"{output}\" only repeats the name. State the type itself, or leave the outputs empty.")); continue; }
                 if length(output) > MAX_PORT { errors.push(format!("{at}: output \"{output}\" is longer than {MAX_PORT} characters.")); }
                 else if !is_typed_name(output) && !is_type_expression(output) { errors.push(format!("{at}: output \"{output}\" must be a TypeScript type or name: Type, for example Promise<boolean>.")); }
             }
         }
-        // A file that only declares types is not a module: it does nothing in the module graph.
-        // Its types belong in the interfaces of the module that uses them.
-        if !m.interfaces.is_empty() && !m.interfaces.iter().any(|i| i.kind.is_offered_to_modules()) {
-            errors.push(format!("\"{label}\" offers only types or server requests to other modules, so it is not a module. Put its types and file into the module that uses them."));
+        // A file of types is not a module, with or without default values next to them: it does
+        // nothing in the module graph. Its types belong to the module that uses them. A module of
+        // constants alone (configuration) is allowed.
+        let declares_types = m.interfaces.iter().any(|i| i.kind == InterfaceKind::Type);
+        let only_server = !m.interfaces.is_empty() && m.interfaces.iter().all(|i| i.kind == InterfaceKind::Server);
+        if (declares_types || only_server) && !m.interfaces.iter().any(|i| i.kind.acts()) {
+            errors.push(format!("\"{label}\" declares types, constants or server requests but no component, hook, function or store, so it is not a module. Put its types and file into the module that uses them."));
         }
 
         // Claims about the repository are checked against the repository.
@@ -374,6 +386,33 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
     }
     for m in modules.iter().filter(|m| m.kind == Kind::Existing) {
         if !depended_on.contains(m.id.as_str()) { errors.push(format!("Existing module \"{}\" is in the plan but nothing depends on it.", m.name)); }
+    }
+    // An interface belongs to one module; a second module that lists it is re-exporting it.
+    let planned: Vec<&Module> = modules.iter().filter(|m| m.kind != Kind::Existing).collect();
+    let mut owner: HashMap<&str, &Module> = HashMap::new();
+    for m in &planned {
+        for interface in m.interfaces.iter().filter(|i| i.kind != InterfaceKind::Server && !i.name.trim().is_empty()) {
+            if let Some(first) = owner.insert(interface.name.as_str(), m) {
+                if first.id != m.id { errors.push(format!("Interface \"{}\" is listed by both \"{}\" and \"{}\". It belongs to one module; the other imports it.", interface.name, first.name, m.name)); }
+            }
+        }
+    }
+    // A module whose every acting interface has exactly the signature of an interface of a module
+    // it imports from only passes that module through. That is the slice's index, not a module.
+    let signature = |i: &Interface| (normalized(&i.inputs), normalized(&i.outputs));
+    for m in &planned {
+        let own: Vec<&Interface> = m.interfaces.iter().filter(|i| i.kind.acts()).collect();
+        let imported: Vec<(&Module, &Interface)> = graph.get(m.id.as_str()).into_iter().flatten()
+            .filter_map(|id| by_id.get(id).copied())
+            .flat_map(|dependency| dependency.interfaces.iter().filter(|i| i.kind.acts()).map(move |i| (dependency, i)))
+            .collect();
+        let twins: Vec<(&Interface, &(&Module, &Interface))> = own.iter()
+            .filter_map(|i| imported.iter().find(|(_, other)| !other.outputs.is_empty() && signature(other) == signature(i)).map(|twin| (*i, twin)))
+            .collect();
+        if !own.is_empty() && twins.len() == own.len() {
+            let (interface, (source, original)) = twins[0];
+            errors.push(format!("\"{}\" only passes through \"{}\": {} has the same inputs and outputs as {}. A re-export is the slice's index, not a module.", m.name, source.name, interface.name, original.name));
+        }
     }
     // Requests to the server go through the shared API layer: a module that calls the server is
     // either placed in shared/api or reaches a shared/api module through its dependencies.
@@ -436,12 +475,14 @@ pub fn to_plan(proposal: &Proposal) -> Value {
 mod tests {
     use super::*;
 
+    /// An interface whose signature is its own: the output type is derived from the name.
     fn interface(name: &str, kind: &str) -> Value {
-        json!({"name":name,"kind":kind,"condition":"the caller asks","result":"it answers","inputs":["id: string"],"outputs":["Promise<boolean>"]})
+        let type_name: String = name.chars().filter(char::is_ascii_alphanumeric).collect();
+        json!({"name":name,"kind":kind,"condition":"the caller asks","result":"it answers","inputs":["id: string"],"outputs":[format!("Promise<{type_name}Result>")]})
     }
     fn module(id: &str, kind: &str, layer: &str, slice: Option<&str>, segment: &str) -> Value {
         json!({"id":id,"name":id,"kind":kind,"layer":layer,"slice":slice,"segment":segment,"responsibility":"does one thing",
-            "interfaces":[interface("thing", "function")],"files":["a.ts"]})
+            "interfaces":[interface(&format!("run_{id}"), "function")],"files":["a.ts"]})
     }
     fn proposal(modules: Vec<Value>, dependencies: Vec<(&str, &str)>) -> Proposal {
         let deps: Vec<Value> = dependencies.into_iter().map(|(from, to)| json!({"from":from,"to":to})).collect();
@@ -640,6 +681,53 @@ mod tests {
         let mut with_types = module("model", "new", "features", Some("x"), "model");
         with_types["interfaces"] = json!([interface("RunContract", "type"), interface("runSentence", "function")]);
         assert_eq!(check(&proposal(vec![with_types], vec![]), &[]), NONE);
+    }
+
+    #[test]
+    fn types_with_a_default_value_are_still_not_a_module() {
+        // The shape that slipped through: three types and one constant holding an empty value.
+        let mut contract = module("contract", "new", "features", Some("x"), "model");
+        let mut empty = interface("EMPTY_RESULT", "constant");
+        empty["condition"] = json!("");
+        empty["result"] = json!("");
+        contract["interfaces"] = json!([empty.clone(), interface("RunInput", "type"), interface("RunResult", "type")]);
+        assert!(has(&check(&proposal(vec![contract], vec![]), &[]), "so it is not a module"));
+        // Constants alone are configuration, which is a module.
+        let mut config = module("config", "new", "shared", None, "config");
+        config["interfaces"] = json!([empty]);
+        assert_eq!(check(&proposal(vec![config], vec![]), &[]), NONE);
+    }
+
+    #[test]
+    fn an_output_that_repeats_the_name_is_rejected() {
+        let mut shape = interface("RunInput", "type");
+        shape["outputs"] = json!(["RunInput"]);
+        let mut m = module("a", "new", "features", Some("x"), "model");
+        m["interfaces"] = json!([shape, interface("run", "function")]);
+        assert!(has(&check(&proposal(vec![m], vec![]), &[]), "only repeats the name"));
+        let mut value = interface("Sentence", "constant");
+        value["outputs"] = json!(["typeof Sentence"]);
+        assert!(has(&check_interface(value), "only repeats the name"));
+    }
+
+    #[test]
+    fn an_interface_has_one_owner_and_a_pass_through_is_not_a_module() {
+        // "api" re-exports the hook of "hook" under another name, and lists its type again.
+        let mut hook = module("hook", "new", "features", Some("x"), "lib");
+        hook["interfaces"] = json!([interface("useRuntime", "hook"), interface("RunResult", "type")]);
+        let mut api = module("api", "new", "features", Some("x"), "public-api");
+        let mut reexport = interface("useSentences", "hook");
+        reexport["outputs"] = interface("useRuntime", "hook")["outputs"].clone();
+        api["interfaces"] = json!([reexport, interface("RunResult", "type")]);
+        let errors = check(&proposal(vec![hook.clone(), api], vec![("api", "hook")]), &[]);
+        assert!(has(&errors, "is listed by both"), "{errors:?}");
+        assert!(has(&errors, "only passes through"), "{errors:?}");
+        // A module that adds something of its own next to a wrapper is a module.
+        let mut different = interface("useSentences", "hook");
+        different["outputs"] = json!(["SlotContent"]);
+        let mut widget = module("widget", "new", "widgets", Some("editor"), "model");
+        widget["interfaces"] = json!([different]);
+        assert_eq!(check(&proposal(vec![hook, widget], vec![("widget", "hook")]), &[]), NONE);
     }
 
     #[test]

@@ -47,11 +47,15 @@ The AI is not trusted to follow instructions about shape or rules.
    - Behavior is stated per interface as a `condition` (may be empty) and one `result`, the two halves of an EARS requirement. Every component, hook, function, store and server interface of a `new` or `modify` module states its result. There is no module-level behavior list.
    - Inputs are written `name: Type` and outputs as a type or `name: Type`, in TypeScript. The check is not a parser: it accepts only ASCII, requires balanced brackets, and rejects two plain words in a row unless one is a type keyword, which keeps descriptions out.
    - Free text and lists are limited: summary 300 characters; module name 40; responsibility 100 and one sentence; `condition` 80 and `result` 100, one sentence each; 12 interfaces and 12 files per module; 8 inputs and 8 outputs per interface, 120 characters each.
-   - A module offers something other than types to other modules. A file that only declares types is not a module and is rejected; its types belong in the interfaces of the module that uses them.
+   - A module has at least one interface that acts: a component, hook, function or store. Something that declares types (with or without constants next to them) or only server requests is not a module; its types belong to the module that uses them. A module of constants alone is allowed.
+   - An interface is listed by one planned module only. A module whose every acting interface has exactly the inputs and outputs of an interface of a module it imports from is a pass-through and is rejected: a re-export is the slice index, not a module.
+   - An output that only repeats the interface name (`Name` or `typeof Name`) is rejected.
    - A server interface is named `METHOD /path`. A module with a server interface is placed in `shared/api` or reaches a `shared/api` module through its dependencies.
    - Dependencies refer to modules in the plan, are not duplicated, do not start at an `existing` module, and form no cycle. A dependency points to a lower layer or stays inside one slice.
    - Every `existing` module is depended on by another module.
 4. **Rejection and retry.** A rejected answer is sent back to Codex with the full list of violations, up to three attempts in total. If the last attempt is still rejected, the job fails with that list. Only an answer with no violations becomes `proposed-plan.json`.
+
+`factory-server check-proposal <file>` runs the same validator on a proposal by hand, against the repository in `FACTORY_REPO_PATH`.
 
 Each job keeps its files in `data/jobs/<uuid>/`: `prompt.txt`, `schema.json`, `result-<n>.json` (raw answer of each attempt), `rejected-<n>.json` (its violations), `exit.json`, and `proposed-plan.json` when an attempt passed.
 

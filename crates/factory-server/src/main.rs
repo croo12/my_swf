@@ -172,7 +172,9 @@ Your answer is checked by a program and rejected as a whole if any of these is n
 - Every "new" or "modify" module has at least one interface. An interface has a unique name and a kind.
 - Every component, hook, function, store and server interface of a "new" or "modify" module states its "result". "condition" holds the condition or trigger and is empty if the result always holds. Each is one sentence.
 - Every input is written name: Type, and every output is a type or name: Type, using TypeScript types (for example id: string, Promise<boolean>, job: JobView | null). Prose is rejected.
-- A module offers something other than types to other modules: a component, hook, function, store or constant. A file that only declares types is not a module; list its types and its file in the module that uses them.
+- A module has at least one component, hook, function or store. Something that only declares types, with or without constants, is not a module; list its types and its file in the module that uses them.
+- An interface is listed by one module only. A module that only re-exports another module (its interfaces have the same inputs and outputs as those of a module it imports) is not a module.
+- An output states a type; it never just repeats the interface name.
 - A request to the server is an interface of kind "server", named METHOD /path. A module with such an interface is placed in shared/api or depends, directly or indirectly, on a module in shared/api.
 - A dependency points to a lower layer, or stays inside one slice. There are no cycles, no duplicates, and no dependencies that start at an "existing" module.
 - The length and size limits stated in the answer schema hold.
@@ -344,6 +346,21 @@ async fn job_status(State(s):State<Arc<AppState>>,headers:HeaderMap,RoutePath(id
 async fn main()->Result<(),Box<dyn std::error::Error>> {
     // `factory-server run-codex <job-dir>` runs the agent for one job; see run_agent_in_pane.
     let args:Vec<String>=env::args().collect();
+    // `factory-server check-proposal <file>` runs the validator on a proposal by hand, against the
+    // repository in FACTORY_REPO_PATH. It prints every violation and exits with 1 if there is any.
+    if args.get(1).map(String::as_str)==Some("check-proposal") {
+        let file=args.get(2).ok_or("Usage: factory-server check-proposal <proposal.json>")?;
+        let repo=std::path::absolute(env::var("FACTORY_REPO_PATH").map_err(|_|"Set FACTORY_REPO_PATH")?)?;
+        let scan=graph::scan(&repo)?;
+        let paths:HashSet<String>=scan.get("nodes").and_then(Value::as_array).into_iter().flatten()
+            .filter_map(|n|n.get("path").and_then(Value::as_str).map(str::to_owned)).collect();
+        let root=repo.join(scan.pointer("/analysis/sourceRoot").and_then(Value::as_str).unwrap_or(""));
+        let proposal:planner::Proposal=serde_json::from_str(&std::fs::read_to_string(file)?)?;
+        let errors=planner::validate(&proposal,&planner::Disk{paths:&paths,file_exists:&|file|root.join(file).is_file()});
+        for error in &errors {println!("- {error}");}
+        println!("{} violation(s)",errors.len());
+        std::process::exit(if errors.is_empty() {0} else {1});
+    }
     if args.get(1).map(String::as_str)==Some("run-codex") {
         let job_dir=args.get(2).ok_or("Usage: factory-server run-codex <job-dir>")?;
         std::process::exit(run_codex(Path::new(job_dir)));
