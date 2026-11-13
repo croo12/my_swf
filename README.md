@@ -101,7 +101,7 @@ The app has two views, switched in the header.
 
 A request is addressed to the selected module or to the whole plan; the target is shown next to the request box.
 
-Codex runs with a read-only sandbox in the repository's working tree as it is on the server: the checked-out branch, its commit, and any uncommitted changes. Nothing is fetched or pulled, so update that checkout yourself when the plan should be based on newer code. The header chip and the job status show the branch and commit in use. Only client code inside the FSD layers can be planned; the answer schema has no way to express other code. The Herdr workspace of each job is kept for inspection.
+Before a planning job and before a repository analysis, the server runs `git pull --ff-only` in its repository, so both are based on the newest code of the checked-out branch. Keep that checkout for planning only: Codex runs with a read-only sandbox and never changes it. If the pull fails (no network, no upstream, local commits), the job continues on the existing checkout and says so. The header chip and the job status show the branch and commit in use. Only client code inside the FSD layers can be planned; the answer schema has no way to express other code. The Herdr workspace of each job is kept for inspection.
 
 ## D. Windows client
 

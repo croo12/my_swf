@@ -97,8 +97,25 @@ async fn read_json(path:&Path)->Result<Value, ApiError> {
     let bytes=fs::read(path).await.map_err(|e|err(StatusCode::NOT_FOUND,e))?;
     serde_json::from_slice(&bytes).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,e))
 }
-/// What the repository's working tree is on right now. Planning reads the working tree as it is:
-/// the checked-out branch, its commit, and any uncommitted changes. Nothing is fetched or pulled.
+/// Brings the checked-out branch up to date with its upstream before the repository is read, so
+/// plans and analyses are based on the newest code. Fast-forward only: the agent runs read-only and
+/// this checkout is not edited by hand, so there is nothing to merge. A checkout that cannot be
+/// fast-forwarded (no network, no upstream, local commits) is left as it is and the reason is
+/// returned, so the caller can say what the result is based on.
+async fn pull_latest(repo:&Path)->Result<(),String> {
+    // Never wait for a password prompt: there is nobody to answer it.
+    let run=Command::new("git").arg("-C").arg(repo).args(["pull","--ff-only"]).env("GIT_TERMINAL_PROMPT","0").kill_on_drop(true).output();
+    let output=tokio::time::timeout(Duration::from_secs(90),run).await.map_err(|_|"git pull did not finish within 90 seconds".to_owned())?
+        .map_err(|e|format!("cannot run git: {e}"))?;
+    if output.status.success() {return Ok(());}
+    let reason=String::from_utf8_lossy(&output.stderr);
+    // Git explains the failure on its first "fatal:" or "error:" line; what follows is advice.
+    let line=reason.lines().map(str::trim).find(|line|line.starts_with("fatal:")||line.starts_with("error:"))
+        .or_else(||reason.lines().map(str::trim).find(|line|!line.is_empty())).unwrap_or("git pull failed");
+    Err(line.chars().take(200).collect())
+}
+/// What the repository's working tree is on right now: the checked-out branch, its commit, and
+/// any uncommitted changes.
 async fn git_state(repo:&Path)->Value {
     async fn git(repo:&Path,args:&[&str])->Option<String> {
         let run=Command::new("git").arg("-C").arg(repo).args(args).kill_on_drop(true).output();
@@ -142,10 +159,11 @@ async fn approve(State(s):State<Arc<AppState>>,headers:HeaderMap)->ApiResult {
 }
 async fn analyze(State(s):State<Arc<AppState>>,headers:HeaderMap)->ApiResult {
     auth(&headers,&s)?;
+    let pull_error=pull_latest(&s.repository).await.err();
     let repo=s.repository.clone();
     let result=tokio::task::spawn_blocking(move||graph::scan(&repo)).await.map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,e))?;
     let plan=result.map_err(|e|err(StatusCode::UNPROCESSABLE_ENTITY,e))?;
-    Ok(Json(json!({"plan":plan})))
+    Ok(Json(json!({"plan":plan,"git":git_state(&s.repository).await,"pullError":pull_error})))
 }
 fn now_ms()->u128 {SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis()}
 async fn persist_job(s:&AppState,job:&Job) {
@@ -254,12 +272,17 @@ async fn execute_job(s:Arc<AppState>,id:String,instruction:String) {
     let label=format!("factory-{}",&id[..8]);
     let result:Result<Value,String>=async {
         // 1. Facts from the repository: where the FSD layers are and which modules exist.
+        update_job(&s,&id,"running","저장소를 최신으로 갱신 중".into(),None,None).await;
+        let pull_error=pull_latest(&s.repository).await.err();
         let git=git_state(&s.repository).await;
         let based_on=match (git.get("branch").and_then(Value::as_str),git.get("commit").and_then(Value::as_str)) {
-            (Some(branch),Some(commit)) => format!("{branch} @ {commit}{}",if git.get("uncommittedFiles").and_then(Value::as_u64).unwrap_or(0)>0 {" + 미커밋 변경"} else {""}),
+            (Some(branch),Some(commit)) => format!("{branch} @ {commit}{}{}",
+                if git.get("uncommittedFiles").and_then(Value::as_u64).unwrap_or(0)>0 {" + 미커밋 변경"} else {""},
+                // A plan on stale code must say so.
+                pull_error.as_ref().map(|reason|format!(" (갱신 실패, 이전 상태 기준: {reason})")).unwrap_or_default()),
             _ => "Git 정보 없음".to_owned(),
         };
-        let _=write_json(&dir.join("based-on.json"),&git).await;
+        let _=write_json(&dir.join("based-on.json"),&json!({"git":git,"pullError":pull_error})).await;
         update_job(&s,&id,"running",format!("저장소 구조 확인 중 · 기준: {based_on}"),None,None).await;
         let repo=s.repository.clone();
         let scan=tokio::task::spawn_blocking(move||graph::scan(&repo)).await.map_err(|e|e.to_string())??;

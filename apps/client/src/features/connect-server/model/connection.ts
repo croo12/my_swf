@@ -36,7 +36,7 @@ export async function checkConnection(): Promise<boolean> {
       color: '#4ed2aa',
       detail: git
         ? [
-            `계획은 서버의 이 작업 폴더를 그대로 읽습니다 (fetch·pull 하지 않음).`,
+            `계획 요청과 저장소 분석 직전에 서버가 이 브랜치를 pull 합니다 (fast-forward만).`,
             `브랜치: ${git.branch}`,
             `커밋: ${git.commit} (${new Date(git.committedAt).toLocaleString()})`,
             git.uncommittedFiles > 0 ? `커밋하지 않은 변경: 파일 ${git.uncommittedFiles}개` : '커밋하지 않은 변경 없음',

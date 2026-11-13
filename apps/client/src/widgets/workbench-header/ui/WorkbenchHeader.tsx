@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { EDGE_TYPES, planStore, selectionStore } from '@/entities/plan';
 import { analyzeRepository } from '@/features/analyze-repository';
-import { openConnectionDialog, serverStatusStore } from '@/features/connect-server';
+import { checkConnection, openConnectionDialog, serverStatusStore } from '@/features/connect-server';
 import { addNode, clearPlan, edgeTypeStore, toggleConnectFromSelected, undo } from '@/features/edit-graph';
 import { exportPlan, importPlanFile } from '@/features/plan-transfer';
 import { approveOnServer, loadFromServer, saveToServer } from '@/features/server-sync';
@@ -13,6 +13,8 @@ import { Menu } from '@/shared/ui/menu';
 const analyze = async () => {
   setView('repository');
   await analyzeRepository();
+  // The server pulls before it analyzes, so the commit shown in the header may have changed.
+  void checkConnection();
 };
 
 /** Single-row header: title, view switch, plan editing tools, server status, and menus. */

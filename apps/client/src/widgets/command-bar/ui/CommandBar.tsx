@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import { clearSelection, planStore, selectionStore } from '@/entities/plan';
+import { checkConnection } from '@/features/connect-server';
 import { JobBar, startJob } from '@/features/plan-job';
 import { recordRequest, removeRequest } from '@/features/record-request';
 import { useStore } from '@/shared/lib';
+
+const SERVER_PULL_WAIT_MS = 15_000;
 
 /**
  * Bottom area for design requests. A request is addressed either to the selected node or to the
@@ -23,7 +26,10 @@ export function CommandBar() {
     if (recordRequest(command, targetId)) setCommand('');
   };
   const requestPlan = async () => {
-    if (await startJob(command, target?.path ?? null)) setCommand('');
+    if (!(await startJob(command, target?.path ?? null))) return;
+    setCommand('');
+    // The server pulls the repository when a job starts; show the commit it ended up on.
+    setTimeout(() => void checkConnection(), SERVER_PULL_WAIT_MS);
   };
 
   return (
