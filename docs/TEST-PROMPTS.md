@@ -8,12 +8,12 @@ When a prompt has to change, add a new entry with a new id instead of editing an
 
 Each entry: the exact text, whether the plan was empty, and the target (whole plan or a module).
 
-### G1 — report sentence execution
+### G1 — refactor features/variant-filter
 
 Plan: empty. Target: whole plan.
 
 ```text
-(paste the exact request here)
+features/variant-filter 의 로직을 깔끔하게 정리하고 싶습니다. 리팩토링 해주세요.
 ```
 
 ## Requests already sent
