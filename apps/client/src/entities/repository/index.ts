@@ -1,4 +1,11 @@
 export {
+  loadSliceModules,
+  sliceModulesStore,
+  type OutsideLink,
+  type SliceModules,
+  type SliceModulesState,
+} from './model/slice-modules';
+export {
   buildRepository,
   repositoryStore,
   sliceKeyOf,

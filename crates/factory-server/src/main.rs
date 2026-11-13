@@ -164,10 +164,44 @@ async fn analyze(State(s):State<Arc<AppState>>,headers:HeaderMap)->ApiResult {
     let result=tokio::task::spawn_blocking(move||graph::scan(&repo)).await.map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,e))?;
     let mut plan=result.map_err(|e|err(StatusCode::UNPROCESSABLE_ENTITY,e))?;
     // The per-import records are for building plans; the overview only needs which node imports which.
-    for edge in plan.get_mut("edges").and_then(Value::as_array_mut).into_iter().flatten() {
-        if let Some(fields)=edge.as_object_mut() {fields.remove("imports");}
-    }
+    if let Some(fields)=plan.as_object_mut() {fields.remove("records");}
     Ok(Json(json!({"plan":plan,"git":git_state(&s.repository).await,"pullError":pull_error})))
+}
+/// Scans the repository as it is now. Plans are checked against the checkout the server has; the
+/// pull happens when the repository is analyzed or a job starts.
+async fn scan_repository(s:&AppState)->Result<Value,(StatusCode,String)> {
+    let repo=s.repository.clone();
+    tokio::task::spawn_blocking(move||graph::scan(&repo)).await.map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,e))?
+        .map_err(|e|err(StatusCode::UNPROCESSABLE_ENTITY,e))
+}
+/// The modules of one slice as they exist in the repository, in the shape of plan modules.
+async fn slice_modules(State(s):State<Arc<AppState>>,headers:HeaderMap,Json(input):Json<Value>)->ApiResult {
+    auth(&headers,&s)?;
+    let key=input.get("slice").and_then(Value::as_str).unwrap_or("").trim().trim_matches('/').to_owned();
+    if key.is_empty() {return Err(err(StatusCode::BAD_REQUEST,"slice is required"));}
+    let scan=scan_repository(&s).await?;
+    let repo=s.repository.clone();
+    let modules=tokio::task::spawn_blocking(move||graph::slice_modules(&repo,&scan,&key)).await.map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,e))?
+        .map_err(|e|err(StatusCode::UNPROCESSABLE_ENTITY,e))?;
+    Ok(Json(modules))
+}
+/// Checks a plan drawn by a person with the rules used for proposals, and returns the code around
+/// it. Nothing is stored.
+async fn check_plan(State(s):State<Arc<AppState>>,headers:HeaderMap,Json(input):Json<Value>)->ApiResult {
+    auth(&headers,&s)?;
+    let plan=input.get("plan").cloned().unwrap_or(Value::Null);
+    let scan=scan_repository(&s).await?;
+    let git=git_state(&s.repository).await;
+    let proposal=match planner::proposal_from_plan(&plan) {
+        Ok(proposal) => proposal,
+        Err(reason) => return Ok(Json(json!({"errors":[reason],"nodes":[],"edges":[],"git":git}))),
+    };
+    let paths:HashSet<String>=scan.get("nodes").and_then(Value::as_array).into_iter().flatten()
+        .filter_map(|n|n.get("path").and_then(Value::as_str).map(str::to_owned)).collect();
+    let root=s.repository.join(scan.pointer("/analysis/sourceRoot").and_then(Value::as_str).unwrap_or(""));
+    let errors=planner::validate(&proposal,&planner::Disk{paths:&paths,file_exists:&|file|root.join(file).is_file()},planner::Author::Person);
+    let (nodes,edges)=planner::surroundings(&proposal,&planner::observed_imports(&scan));
+    Ok(Json(json!({"errors":errors,"nodes":nodes,"edges":edges,"git":git})))
 }
 fn now_ms()->u128 {SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis()}
 async fn persist_job(s:&AppState,job:&Job) {
@@ -336,7 +370,7 @@ async fn execute_job(s:Arc<AppState>,id:String,instruction:String) {
             let _=fs::write(dir.join(format!("result-{attempt}.json")),&answer).await;
             let errors=match serde_json::from_str::<planner::Proposal>(&answer) {
                 Ok(proposal) => {
-                    let errors=planner::validate(&proposal,&planner::Disk{paths:&paths,file_exists:&|file|root.join(file).is_file()});
+                    let errors=planner::validate(&proposal,&planner::Disk{paths:&paths,file_exists:&|file|root.join(file).is_file()},planner::Author::Agent);
                     if errors.is_empty() {return Ok(planner::to_plan(&proposal,&observed));}
                     errors
                 }
@@ -409,12 +443,19 @@ async fn main()->Result<(),Box<dyn std::error::Error>> {
             .filter_map(|n|n.get("path").and_then(Value::as_str).map(str::to_owned)).collect();
         let root=repo.join(scan.pointer("/analysis/sourceRoot").and_then(Value::as_str).unwrap_or(""));
         let proposal:planner::Proposal=serde_json::from_str(&std::fs::read_to_string(file)?)?;
-        let errors=planner::validate(&proposal,&planner::Disk{paths:&paths,file_exists:&|file|root.join(file).is_file()});
+        let errors=planner::validate(&proposal,&planner::Disk{paths:&paths,file_exists:&|file|root.join(file).is_file()},planner::Author::Agent);
         for error in &errors {println!("- {error}");}
         println!("{} violation(s)",errors.len());
         // With a second argument, also write the plan the client would get.
         if let Some(out)=args.get(3) {std::fs::write(out,serde_json::to_vec_pretty(&planner::to_plan(&proposal,&planner::observed_imports(&scan)))?)?;}
         std::process::exit(if errors.is_empty() {0} else {1});
+    }
+    // `factory-server slice-modules <layer/slice>` prints the modules of a slice of FACTORY_REPO_PATH.
+    if args.get(1).map(String::as_str)==Some("slice-modules") {
+        let key=args.get(2).ok_or("Usage: factory-server slice-modules <layer/slice>")?;
+        let repo=std::path::absolute(env::var("FACTORY_REPO_PATH").map_err(|_|"Set FACTORY_REPO_PATH")?)?;
+        println!("{}",serde_json::to_string_pretty(&graph::slice_modules(&repo,&graph::scan(&repo)?,key)?)?);
+        return Ok(());
     }
     if args.get(1).map(String::as_str)==Some("run-codex") {
         let job_dir=args.get(2).ok_or("Usage: factory-server run-codex <job-dir>")?;
@@ -435,6 +476,8 @@ async fn main()->Result<(),Box<dyn std::error::Error>> {
         .route("/api/plan",get(get_plan).put(put_plan))
         .route("/api/approve",post(approve))
         .route("/api/repository/analyze",post(analyze))
+        .route("/api/repository/modules",post(slice_modules))
+        .route("/api/plan/check",post(check_plan))
         .route("/api/jobs",post(start_job))
         .route("/api/jobs/{id}",get(job_status))
         .layer(DefaultBodyLimit::max(4*1024*1024))

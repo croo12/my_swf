@@ -1,48 +1,38 @@
-// Brings one slice of the analyzed repository into the plan as existing modules, for context.
-import { kindOf, mutatePlan, planStore, type PlanNode } from '@/entities/plan';
-import { repositoryStore, sliceKeyOf } from '@/entities/repository';
+// Starts planning from what exists: brings the modules of one slice into the plan as they are in
+// the repository, with their real interfaces and the real dependencies between them.
+import { mutatePlan, normalizeImported, planStore, type PlanNode } from '@/entities/plan';
+import { loadSliceModules } from '@/entities/repository';
 import { notify } from '@/shared/ui/toast';
 
-/** Placements that the plan already shows as existing modules. New modules may share a placement with them. */
-const existingPaths = (nodes: PlanNode[]) => new Set(nodes.filter((n) => kindOf(n) === 'existing').map((n) => n.path));
-
-/** How many segments of the slice the plan already shows as existing modules. */
+/** How many modules of the slice the plan holds. Code the server added around the plan does not count. */
 export function countSliceInPlan(sliceKey: string, planNodes: PlanNode[]): number {
-  const repository = repositoryStore.get();
-  if (!repository) return 0;
-  const paths = existingPaths(planNodes);
-  return repository.nodes.filter((n) => sliceKeyOf(n) === sliceKey && paths.has(n.path)).length;
+  return planNodes.filter((n) => !n.observed && (n.path === sliceKey || n.path.startsWith(sliceKey + '/'))).length;
 }
 
 /**
- * Adds the slice's segments to the plan, together with the observed imports between them and the
- * nodes already in the plan. Segments that are already there are left as they are.
+ * Adds the slice's modules and the dependencies between them to the plan as existing modules.
+ * Modules that are already in the plan are left as they are. Returns whether anything was added.
  */
-export function addSliceToPlan(sliceKey: string): void {
-  const repository = repositoryStore.get();
-  if (!repository) return;
-  const present = existingPaths(planStore.get().plan.nodes);
-  const added = repository.nodes
-    .filter((n) => sliceKeyOf(n) === sliceKey && !present.has(n.path))
-    .map((n) => ({ ...n, kind: 'existing' as const }));
+export async function addSliceToPlan(sliceKey: string): Promise<boolean> {
+  const modules = await loadSliceModules(sliceKey, true);
+  if (!modules) {
+    notify('슬라이스 구조를 읽지 못했습니다. 서버 연결을 확인하세요.');
+    return false;
+  }
+  const { nodes, edges } = normalizeImported({ nodes: modules.nodes, edges: modules.edges });
+  const present = new Set(planStore.get().plan.nodes.map((n) => n.id));
+  const added = nodes.filter((n) => !present.has(n.id));
   if (added.length === 0) {
     notify('이미 계획에 있는 슬라이스입니다.');
-    return;
+    return false;
   }
-  mutatePlan(`${sliceKey}의 세그먼트 ${added.length}개를 계획에 추가했습니다.`, (plan) => {
-    const nodes = [...plan.nodes, ...added];
-    // Scan ids and plan ids can differ for the same module, so relations are matched by path.
-    const idByPath = new Map(nodes.filter((n) => kindOf(n) === 'existing').map((n) => [n.path, n.id]));
-    const pathOfScanId = new Map(repository.nodes.map((n) => [n.id, n.path]));
-    const known = new Set(plan.edges.map((e) => `${e.from}>${e.to}>${e.type}`));
-    const edges = [...plan.edges];
-    for (const edge of repository.edges) {
-      const from = idByPath.get(pathOfScanId.get(edge.from) ?? '');
-      const to = idByPath.get(pathOfScanId.get(edge.to) ?? '');
-      if (!from || !to || known.has(`${from}>${to}>${edge.type}`)) continue;
-      known.add(`${from}>${to}>${edge.type}`);
-      edges.push({ ...edge, id: `${edge.id}-${edges.length}`, from, to });
-    }
-    return { ...plan, nodes, edges };
+  mutatePlan(`${sliceKey}의 모듈 ${added.length}개를 계획에 가져왔습니다.`, (plan) => {
+    const known = new Set(plan.edges.map((e) => e.id));
+    return {
+      ...plan,
+      nodes: [...plan.nodes, ...added],
+      edges: [...plan.edges, ...edges.filter((e) => !known.has(e.id))],
+    };
   });
+  return true;
 }

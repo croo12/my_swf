@@ -17,7 +17,7 @@ import {
   type PlanNode,
 } from '@/entities/plan';
 import { useStore } from '@/shared/lib';
-import { deleteNode, removeEdge, saveNode } from '../model/actions';
+import { deleteNode, removeEdge, saveNode, setEdgeUses } from '../model/actions';
 
 const lines = (text: string) =>
   text
@@ -255,15 +255,47 @@ function NodeEditorForm({ node, nodes, edges }: { node: PlanNode; nodes: PlanNod
           {related.length === 0 && <div className="help">연결 없음</div>}
           {related.map((e) => {
             const target = other(e);
+            const uses = e.uses ?? [];
+            // What this module uses of the other one is chosen here, on the side that depends.
+            const offered =
+              e.from === node.id && !e.observed
+                ? (target?.interfaces ?? []).filter((item) => item.kind !== 'server')
+                : [];
             return (
               <div key={e.id} className="edge-row">
                 <span>
                   {e.from === node.id ? '→' : '←'} {e.type} · {target ? moduleNameOf(target) : '?'}
-                  {e.uses?.length ? <small className="edge-row-uses">{e.uses.join(', ')}</small> : null}
+                  {offered.length === 0 && uses.length > 0 && (
+                    <small className="edge-row-uses">{uses.join(', ')}</small>
+                  )}
+                  {offered.length > 0 && (
+                    <span className="edge-uses-pick" aria-label="사용하는 인터페이스">
+                      {offered.map((item) => {
+                        const used = uses.includes(item.name);
+                        return (
+                          <button
+                            key={item.name}
+                            className={used ? 'used' : ''}
+                            aria-pressed={used}
+                            onClick={() =>
+                              setEdgeUses(
+                                e.id,
+                                used ? uses.filter((listed) => listed !== item.name) : [...uses, item.name],
+                              )
+                            }
+                          >
+                            {item.name}
+                          </button>
+                        );
+                      })}
+                    </span>
+                  )}
                 </span>
-                <button className="textbtn" onClick={() => removeEdge(e.id)}>
-                  삭제
-                </button>
+                {!e.observed && (
+                  <button className="textbtn" onClick={() => removeEdge(e.id)}>
+                    삭제
+                  </button>
+                )}
               </div>
             );
           })}

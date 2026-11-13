@@ -9,6 +9,7 @@ import {
   type ModuleKind,
   closeEditor,
   layerOf,
+  commitPlan,
   mutatePlan,
   openEditor,
   planStore,
@@ -118,6 +119,11 @@ export function deleteNode(id: string): void {
 
 export function removeEdge(edgeId: string): void {
   mutatePlan('연결을 삭제했습니다.', (p) => ({ ...p, edges: p.edges.filter((e) => e.id !== edgeId) }));
+}
+
+/** Sets which interfaces of the target a relation uses. */
+export function setEdgeUses(edgeId: string, uses: string[]): void {
+  commitPlan((p) => ({ ...p, edges: p.edges.map((e) => (e.id === edgeId ? { ...e, uses } : e)) }));
 }
 
 export function undo(): void {

@@ -274,7 +274,41 @@ fn is_clean_name(part: &str) -> bool {
 
 /// Checks a proposal against the rules and against the repository.
 /// Returns every violation found, so a rejected proposal can be understood in one read.
-pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
+/// Who wrote the plan. An agent may mention an existing module only for what its planned work
+/// uses. A person draws the plan starting from the existing structure, so existing modules keep
+/// their real interfaces and the real dependencies between them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Author { Agent, Person }
+
+/// Turns the plan document the client edits back into a proposal, so a plan drawn by a person is
+/// checked by the same rules. Code the server added around the plan is left out.
+pub fn proposal_from_plan(plan: &Value) -> Result<Proposal, String> {
+    let observed = |value: &Value| value.get("observed").and_then(Value::as_bool).unwrap_or(false);
+    let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).unwrap_or("").trim().to_owned();
+    let list = |value: &Value, key: &str| -> Vec<Value> { value.get(key).and_then(Value::as_array).cloned().unwrap_or_default() };
+    let nodes: Vec<Value> = list(plan, "nodes").into_iter().filter(|n| !observed(n)).collect();
+    let ids: HashSet<String> = nodes.iter().map(|n| text(n, "id")).collect();
+    let modules: Vec<Value> = nodes.iter().map(|n| {
+        let path = text(n, "path");
+        let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+        let (layer, segment) = (parts.first().copied().unwrap_or(""), parts.last().copied().unwrap_or(""));
+        let slice = (parts.len() > 2).then(|| parts[1..parts.len() - 1].join("/"));
+        let name = text(n, "name");
+        let interfaces: Vec<Value> = list(n, "interfaces").iter().map(|i| json!({
+            "name":text(i, "name"),"kind":text(i, "kind"),"condition":text(i, "condition"),"result":text(i, "result"),
+            "inputs":list(i, "inputs"),"outputs":list(i, "outputs")
+        })).collect();
+        json!({"id":text(n, "id"),"name":if name.is_empty() { segment.to_owned() } else { name },"kind":text(n, "kind"),"layer":layer,"slice":slice,"segment":segment,
+            "responsibility":text(n, "description"),"interfaces":interfaces,"files":list(n, "files")})
+    }).collect();
+    let dependencies: Vec<Value> = list(plan, "edges").into_iter()
+        .filter(|e| !observed(e) && ids.contains(&text(e, "from")) && ids.contains(&text(e, "to")))
+        .map(|e| json!({"from":text(&e, "from"),"to":text(&e, "to"),"uses":list(&e, "uses")})).collect();
+    serde_json::from_value(json!({"summary":text(plan, "summary"),"modules":modules,"dependencies":dependencies}))
+        .map_err(|e| format!("The plan cannot be read as modules and dependencies: {e}"))
+}
+
+pub fn validate(proposal: &Proposal, disk: &Disk, author: Author) -> Vec<String> {
     let mut errors = vec![];
     let modules = &proposal.modules;
     if modules.is_empty() { errors.push("The plan has no modules.".to_owned()); }
@@ -288,11 +322,14 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
         if m.id.trim().is_empty() { errors.push(format!("Module \"{label}\" has no id.")); }
         else if by_id.insert(m.id.as_str(), m).is_some() { errors.push(format!("Module id \"{}\" is used more than once.", m.id)); }
         if m.name.trim().is_empty() { errors.push(format!("Module \"{}\" has no name.", m.id)); }
-        if m.responsibility.trim().is_empty() { errors.push(format!("Module \"{label}\" has no responsibility.")); }
+        // What an unchanged module is for is already in its code; the plan need not restate it.
+        if m.responsibility.trim().is_empty() && !(m.kind == Kind::Existing && author == Author::Person) { errors.push(format!("Module \"{label}\" has no responsibility.")); }
         if length(&m.name) > MAX_NAME { errors.push(format!("Module name \"{label}\" has {} characters; at most {MAX_NAME} are allowed.", length(&m.name))); }
         if length(&m.responsibility) > MAX_RESPONSIBILITY { errors.push(format!("Module \"{label}\": the responsibility has {} characters; at most {MAX_RESPONSIBILITY} are allowed.", length(&m.responsibility))); }
         if !is_one_sentence(&m.responsibility) { errors.push(format!("Module \"{label}\": the responsibility must be one sentence.")); }
-        if m.interfaces.len() > MAX_INTERFACES { errors.push(format!("Module \"{label}\" has {} interfaces; at most {MAX_INTERFACES} are allowed. Split the module.", m.interfaces.len())); }
+        // Code a person brought in unchanged is a fact about the repository, not a design to judge.
+        let as_found = m.kind == Kind::Existing && author == Author::Person;
+        if m.interfaces.len() > MAX_INTERFACES && !as_found { errors.push(format!("Module \"{label}\" has {} interfaces; at most {MAX_INTERFACES} are allowed. Split the module.", m.interfaces.len())); }
         if m.files.len() > MAX_FILES { errors.push(format!("Module \"{label}\" names {} files; at most {MAX_FILES} are allowed. Split the module.", m.files.len())); }
 
         // Placement: layer is an enum, so code outside the FSD layers cannot be expressed at all.
@@ -359,7 +396,7 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
         // constants alone (configuration) is allowed.
         let declares_types = m.interfaces.iter().any(|i| i.kind == InterfaceKind::Type);
         let only_server = !m.interfaces.is_empty() && m.interfaces.iter().all(|i| i.kind == InterfaceKind::Server);
-        if (declares_types || only_server) && !m.interfaces.iter().any(|i| i.kind.acts()) {
+        if (declares_types || only_server) && !m.interfaces.iter().any(|i| i.kind.acts()) && !as_found {
             errors.push(format!("\"{label}\" declares types, constants or server requests but no component, hook, function or store, so it is not a module. Put its types and file into the module that uses them."));
         }
 
@@ -380,7 +417,7 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
         };
         if d.from == d.to { errors.push(format!("Module \"{}\" depends on itself.", from.name)); continue; }
         if !seen.insert((d.from.as_str(), d.to.as_str())) { errors.push(format!("Dependency \"{}\" -> \"{}\" is listed more than once.", from.name, to.name)); continue; }
-        if from.kind == Kind::Existing { errors.push(format!("Existing module \"{}\" is unchanged, so the plan must not give it dependencies.", from.name)); }
+        if from.kind == Kind::Existing && author == Author::Agent { errors.push(format!("Existing module \"{}\" is unchanged, so the plan must not give it dependencies.", from.name)); }
         // FSD import rule: only downward, or within one slice (app and shared count as one slice each).
         let same_slice = from.layer == to.layer && from.slice == to.slice;
         if !(from.layer.rank() < to.layer.rank() || same_slice) {
@@ -401,12 +438,12 @@ pub fn validate(proposal: &Proposal, disk: &Disk) -> Vec<String> {
         depended_on.insert(d.to.as_str());
         graph.entry(d.from.as_str()).or_default().push(d.to.as_str());
     }
-    for m in modules.iter().filter(|m| m.kind == Kind::Existing) {
+    for m in modules.iter().filter(|m| m.kind == Kind::Existing && author == Author::Agent) {
         if !depended_on.contains(m.id.as_str()) { errors.push(format!("Existing module \"{}\" is in the plan but nothing depends on it.", m.name)); }
     }
     // An existing module is in the plan only for what the planned work uses, so every interface it
     // lists must be used by a dependency.
-    for m in modules.iter().filter(|m| m.kind == Kind::Existing) {
+    for m in modules.iter().filter(|m| m.kind == Kind::Existing && author == Author::Agent) {
         // Server requests of an existing module are its own business with the server.
         for interface in m.interfaces.iter().filter(|i| i.kind != InterfaceKind::Server) {
             if !used.contains(&(m.id.as_str(), interface.name.as_str())) {
@@ -500,18 +537,12 @@ pub struct ObservedImport {
 
 /// Reads the imports out of a repository scan.
 pub fn observed_imports(scan: &Value) -> Vec<ObservedImport> {
-    let path_of: HashMap<&str, &str> = scan.get("nodes").and_then(Value::as_array).into_iter().flatten()
-        .filter_map(|n| Some((n.get("id")?.as_str()?, n.get("path")?.as_str()?))).collect();
     let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).unwrap_or("").to_owned();
-    let mut out = vec![];
-    for edge in scan.get("edges").and_then(Value::as_array).into_iter().flatten() {
-        let ends = (edge.get("from").and_then(Value::as_str).and_then(|id| path_of.get(id)), edge.get("to").and_then(Value::as_str).and_then(|id| path_of.get(id)));
-        let (Some(from), Some(to)) = ends else { continue; };
-        for import in edge.get("imports").and_then(Value::as_array).into_iter().flatten() {
-            out.push(ObservedImport { from: (*from).to_owned(), file: text(import, "file"), to: (*to).to_owned(), provider: text(import, "provider"), name: text(import, "name") });
-        }
-    }
-    out
+    // Imports inside one placement connect files of the same segment; the plan's surroundings
+    // are about what lies outside a placement.
+    scan.get("records").and_then(Value::as_array).into_iter().flatten()
+        .map(|r| ObservedImport { from: text(r, "from"), file: text(r, "file"), to: text(r, "to"), provider: text(r, "provider"), name: text(r, "name") })
+        .filter(|import| import.from != import.to).collect()
 }
 
 const UNNAMED_IMPORT: &str = "*";
@@ -544,7 +575,7 @@ fn owns(module: &Module, file: &str) -> bool {
 /// An import belongs to a planned module if the module lists the imported name as an interface or
 /// owns the file that declares it; an importing file belongs to the module that lists it. Imports
 /// that touch a planned placement but none of the planned modules' files are left out.
-fn surroundings(proposal: &Proposal, observed: &[ObservedImport]) -> (Vec<Value>, Vec<Value>) {
+pub fn surroundings(proposal: &Proposal, observed: &[ObservedImport]) -> (Vec<Value>, Vec<Value>) {
     let lists = |m: &Module, name: &str| name != UNNAMED_IMPORT && m.interfaces.iter().any(|i| i.name == name);
     // A name may move between segments of one slice; app and shared have no slices.
     let same_slice = |m: &Module, path: &str| m.path() == path
@@ -671,7 +702,7 @@ mod tests {
     fn check(p: &Proposal, paths: &[&str]) -> Vec<String> {
         let paths: HashSet<String> = paths.iter().map(|p| (*p).to_owned()).collect();
         let files: HashSet<String> = paths.iter().map(|p| format!("{p}/a.ts")).collect();
-        validate(p, &Disk { paths: &paths, file_exists: &|file| files.contains(file) })
+        validate(p, &Disk { paths: &paths, file_exists: &|file| files.contains(file) }, Author::Agent)
     }
     /// Validates one new module whose only interface is the given one.
     fn check_interface(interface: Value) -> Vec<String> {

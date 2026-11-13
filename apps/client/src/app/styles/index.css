@@ -2003,3 +2003,138 @@ body {
 .edges path.edge-path.observed.active {
   stroke: #b9a6ff;
 }
+
+/* Repository view: the modules inside the selected slice. */
+.repo-detail {
+  width: 420px;
+}
+.repo-segment {
+  margin-top: 10px;
+}
+.repo-segment-name {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7f93b3;
+  margin-bottom: 4px;
+}
+.repo-module {
+  border: 1px solid #2a3a52;
+  border-radius: 8px;
+  background: #162235;
+  margin-bottom: 4px;
+}
+.repo-module summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  cursor: pointer;
+  list-style: none;
+}
+.repo-module-name {
+  font-size: 12px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.repo-module-counts {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #8fa1bc;
+}
+.repo-module-body {
+  padding: 2px 9px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.repo-outside-title {
+  font-size: 10px;
+  font-weight: 750;
+  color: #9daecb;
+  margin-bottom: 3px;
+}
+.repo-outside > div:not(.repo-outside-title) {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  padding: 2px 0;
+}
+.repo-outside small {
+  color: #7f93b3;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Plan check result. */
+.check-panel {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 8;
+  width: min(620px, calc(100% - 32px));
+  max-height: 45%;
+  overflow: auto;
+  border: 1px solid #7a3d43;
+  border-radius: 12px;
+  background: #1a1420;
+  padding: 12px 14px;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 45%);
+}
+.check-panel.passed {
+  border-color: #2f6b4a;
+  background: #122019;
+}
+.check-panel header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.check-panel header .close {
+  margin-left: auto;
+}
+.check-panel-meta {
+  font-size: 11px;
+  color: #8fa1bc;
+}
+.check-panel ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.check-panel p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #b3c0d6;
+}
+
+/* Choosing which interfaces a relation uses. */
+.edge-uses-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+.edge-uses-pick button {
+  border: 1px solid #33445c;
+  border-radius: 6px;
+  background: transparent;
+  color: #8fa1bc;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.edge-uses-pick button.used {
+  border-color: #7c6ee0;
+  background: #241f45;
+  color: #dcd5ff;
+}

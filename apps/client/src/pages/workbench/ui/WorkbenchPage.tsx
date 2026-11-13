@@ -1,3 +1,4 @@
+import { CheckPanel } from '@/features/check-plan';
 import { ConnectionModal } from '@/features/connect-server';
 import { NodeEditor } from '@/features/edit-graph';
 import { viewStore } from '@/features/switch-view';
@@ -24,6 +25,7 @@ export function WorkbenchPage() {
             <>
               <PlanCanvas />
               <NodeEditor />
+              <CheckPanel />
             </>
           ) : (
             <RepositoryOverview />

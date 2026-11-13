@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { EDGE_TYPES, planStore, selectionStore } from '@/entities/plan';
 import { analyzeRepository } from '@/features/analyze-repository';
+import { checkPlan, checkStore } from '@/features/check-plan';
 import { checkConnection, openConnectionDialog, serverStatusStore } from '@/features/connect-server';
 import { addNode, clearPlan, edgeTypeStore, toggleConnectFromSelected, undo } from '@/features/edit-graph';
 import { exportPlan, importPlanFile } from '@/features/plan-transfer';
@@ -24,6 +25,7 @@ export function WorkbenchHeader() {
   const edgeType = useStore(edgeTypeStore);
   const server = useStore(serverStatusStore);
   const view = useStore(viewStore);
+  const { running: checking } = useStore(checkStore);
   const fileRef = useRef<HTMLInputElement>(null);
   const editing = view === 'plan';
 
@@ -83,6 +85,14 @@ export function WorkbenchHeader() {
               ))}
             </select>
           </div>
+          <button
+            className="btn"
+            title="서버가 정적 규칙으로 계획을 검사하고, 수정할 모듈과 연결된 계획 밖 코드를 붙입니다"
+            disabled={checking || plan.nodes.length === 0}
+            onClick={checkPlan}
+          >
+            {checking ? '검사 중…' : '✓ 검사'}
+          </button>
         </div>
       )}
 
