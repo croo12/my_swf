@@ -45,13 +45,14 @@ export function NodeCard({
       data-id={node.id}
       data-layer={layerOf(node)}
       data-kind={kind}
+      data-observed={node.observed ? 'true' : undefined}
       style={{ left: x, top: y }}
       aria-label={moduleNameOf(node)}
       onClick={onClick}
     >
       <div className="node-head" {...drag}>
         <div className="node-sub">
-          <span className="kindbadge">{MODULE_KIND_LABELS[kind]}</span>
+          <span className="kindbadge">{node.observed ? '계획 밖' : MODULE_KIND_LABELS[kind]}</span>
           <span className="mini" title={node.path}>
             {node.path}
           </span>

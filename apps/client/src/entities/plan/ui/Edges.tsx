@@ -70,6 +70,7 @@ export function Edges({ routes, edges, nodes, width, height, focusId }: EdgesPro
         const className = [
           'edge-path',
           toServer && 'server',
+          edge?.observed && 'observed',
           invalid && 'invalid',
           active && 'active',
           focusId !== null && !active && 'muted',

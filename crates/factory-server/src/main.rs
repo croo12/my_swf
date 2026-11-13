@@ -162,7 +162,11 @@ async fn analyze(State(s):State<Arc<AppState>>,headers:HeaderMap)->ApiResult {
     let pull_error=pull_latest(&s.repository).await.err();
     let repo=s.repository.clone();
     let result=tokio::task::spawn_blocking(move||graph::scan(&repo)).await.map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,e))?;
-    let plan=result.map_err(|e|err(StatusCode::UNPROCESSABLE_ENTITY,e))?;
+    let mut plan=result.map_err(|e|err(StatusCode::UNPROCESSABLE_ENTITY,e))?;
+    // The per-import records are for building plans; the overview only needs which node imports which.
+    for edge in plan.get_mut("edges").and_then(Value::as_array_mut).into_iter().flatten() {
+        if let Some(fields)=edge.as_object_mut() {fields.remove("imports");}
+    }
     Ok(Json(json!({"plan":plan,"git":git_state(&s.repository).await,"pullError":pull_error})))
 }
 fn now_ms()->u128 {SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis()}
@@ -289,6 +293,7 @@ async fn execute_job(s:Arc<AppState>,id:String,instruction:String) {
         let existing:Vec<String>=scan.get("nodes").and_then(Value::as_array).into_iter().flatten()
             .filter_map(|n|n.get("path").and_then(Value::as_str).map(str::to_owned)).collect();
         let source_root=scan.pointer("/analysis/sourceRoot").and_then(Value::as_str).unwrap_or("").to_owned();
+        let observed=planner::observed_imports(&scan);
         let input=read_json(&dir.join("input-plan.json")).await.map_err(|e|e.1)?;
         let current_plan=input.get("plan").cloned().unwrap_or(Value::Null);
 
@@ -332,7 +337,7 @@ async fn execute_job(s:Arc<AppState>,id:String,instruction:String) {
             let errors=match serde_json::from_str::<planner::Proposal>(&answer) {
                 Ok(proposal) => {
                     let errors=planner::validate(&proposal,&planner::Disk{paths:&paths,file_exists:&|file|root.join(file).is_file()});
-                    if errors.is_empty() {return Ok(planner::to_plan(&proposal));}
+                    if errors.is_empty() {return Ok(planner::to_plan(&proposal,&observed));}
                     errors
                 }
                 Err(e) => vec![format!("The answer does not have the required structure: {e}")],
@@ -407,6 +412,8 @@ async fn main()->Result<(),Box<dyn std::error::Error>> {
         let errors=planner::validate(&proposal,&planner::Disk{paths:&paths,file_exists:&|file|root.join(file).is_file()});
         for error in &errors {println!("- {error}");}
         println!("{} violation(s)",errors.len());
+        // With a second argument, also write the plan the client would get.
+        if let Some(out)=args.get(3) {std::fs::write(out,serde_json::to_vec_pretty(&planner::to_plan(&proposal,&planner::observed_imports(&scan)))?)?;}
         std::process::exit(if errors.is_empty() {0} else {1});
     }
     if args.get(1).map(String::as_str)==Some("run-codex") {

@@ -485,16 +485,132 @@ fn find_cycle<'a>(graph: &HashMap<&'a str, Vec<&'a str>>) -> Option<&'a str> {
     graph.keys().find_map(|&node| visit(node, graph, &mut done, &mut path))
 }
 
-/// Converts a validated proposal into the plan document the client edits.
-pub fn to_plan(proposal: &Proposal) -> Value {
-    let nodes: Vec<Value> = proposal.modules.iter().map(|m| json!({
+/// One import that exists in the repository.
+#[derive(Debug, Clone)]
+pub struct ObservedImport {
+    /// Placement of the importing file, and the file itself relative to the source root.
+    pub from: String,
+    pub file: String,
+    /// Placement that provides the name, and the file that declares it (empty when unknown).
+    pub to: String,
+    pub provider: String,
+    /// The imported name; "*" where the import does not name what it takes.
+    pub name: String,
+}
+
+/// Reads the imports out of a repository scan.
+pub fn observed_imports(scan: &Value) -> Vec<ObservedImport> {
+    let path_of: HashMap<&str, &str> = scan.get("nodes").and_then(Value::as_array).into_iter().flatten()
+        .filter_map(|n| Some((n.get("id")?.as_str()?, n.get("path")?.as_str()?))).collect();
+    let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).unwrap_or("").to_owned();
+    let mut out = vec![];
+    for edge in scan.get("edges").and_then(Value::as_array).into_iter().flatten() {
+        let ends = (edge.get("from").and_then(Value::as_str).and_then(|id| path_of.get(id)), edge.get("to").and_then(Value::as_str).and_then(|id| path_of.get(id)));
+        let (Some(from), Some(to)) = ends else { continue; };
+        for import in edge.get("imports").and_then(Value::as_array).into_iter().flatten() {
+            out.push(ObservedImport { from: (*from).to_owned(), file: text(import, "file"), to: (*to).to_owned(), provider: text(import, "provider"), name: text(import, "name") });
+        }
+    }
+    out
+}
+
+const UNNAMED_IMPORT: &str = "*";
+
+fn without_extension(path: &str) -> &str {
+    match path.rsplit_once('.') {
+        Some((stem, extension)) if SOURCE_EXTENSIONS.contains(&extension) => stem,
+        _ => path,
+    }
+}
+
+/// Whether `file` (relative to the source root, possibly without an extension, possibly a folder)
+/// is one of the module's files.
+fn owns(module: &Module, file: &str) -> bool {
+    if file.is_empty() { return false; }
+    let file = without_extension(file);
+    let path = module.path();
+    module.files.iter().any(|own| {
+        let inside = format!("{path}/{}", without_extension(own));
+        // A segment can be a single file that sits next to the segment name.
+        let beside = (without_extension(own) == module.segment).then(|| path.clone());
+        [Some(inside), beside].into_iter().flatten().any(|own| own == file || own == format!("{file}/index") || own.starts_with(&format!("{file}/")))
+    })
+}
+
+/// The code around the plan: files the plan does not mention that import from a planned module, or
+/// that a changed module imports from. These come from the repository's imports, not from the
+/// proposal, so they show what the planned change is really connected to.
+///
+/// An import belongs to a planned module if the module lists the imported name as an interface or
+/// owns the file that declares it; an importing file belongs to the module that lists it. Imports
+/// that touch a planned placement but none of the planned modules' files are left out.
+fn surroundings(proposal: &Proposal, observed: &[ObservedImport]) -> (Vec<Value>, Vec<Value>) {
+    let lists = |m: &Module, name: &str| name != UNNAMED_IMPORT && m.interfaces.iter().any(|i| i.name == name);
+    // A name may move between segments of one slice; app and shared have no slices.
+    let same_slice = |m: &Module, path: &str| m.path() == path
+        || m.slice.as_ref().is_some_and(|slice| m.layer.has_slices() && path.starts_with(&format!("{}/{slice}/", m.layer.name())));
+    let context_id = |path: &str| format!("observed-{}", path.replace('/', "--"));
+
+    let mut context: Vec<String> = vec![];
+    let mut order: Vec<(String, String)> = vec![];
+    let mut uses: HashMap<(String, String), Vec<String>> = HashMap::new();
+    let mut link = |from: String, to: String, name: &str, context_path: Option<&str>| {
+        if let Some(new) = context_path.filter(|new| !context.iter().any(|path| path == new)) { context.push(new.to_owned()); }
+        let key = (from, to);
+        if !uses.contains_key(&key) { order.push(key.clone()); }
+        let list = uses.entry(key).or_default();
+        if name != UNNAMED_IMPORT && !list.iter().any(|listed| listed == name) { list.push(name.to_owned()); }
+    };
+
+    for import in observed {
+        let importer = proposal.modules.iter().find(|m| m.path() == import.from && owns(m, &import.file));
+        let planned_provider = proposal.modules.iter().filter(|m| m.kind != Kind::Existing)
+            .find(|m| same_slice(m, &import.to) && lists(m, &import.name))
+            .or_else(|| proposal.modules.iter().find(|m| m.kind == Kind::Modify && m.path() == import.to && owns(m, &import.provider)));
+        match (importer, planned_provider) {
+            // Unplanned code that uses a planned module.
+            (None, Some(provider)) => link(context_id(&import.from), provider.id.clone(), &import.name, Some(&import.from)),
+            // Unplanned code that a changed module uses. What the plan already lists is not repeated.
+            (Some(m), None) if m.kind == Kind::Modify => {
+                let listed = proposal.modules.iter().any(|other| other.path() == import.to && (lists(other, &import.name) || owns(other, &import.provider)));
+                if listed { continue; }
+                // If the plan has exactly one module at that placement, the import is of that
+                // module: show it there instead of a second card for the same place, unless the
+                // plan already states a dependency between the two.
+                let there: Vec<&Module> = proposal.modules.iter().filter(|other| other.path() == import.to).collect();
+                match there.as_slice() {
+                    [only] => if !proposal.dependencies.iter().any(|d| d.from == m.id && d.to == only.id) { link(m.id.clone(), only.id.clone(), &import.name, None); },
+                    _ => link(m.id.clone(), context_id(&import.to), &import.name, Some(&import.to)),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let nodes = context.iter().map(|path| json!({
+        "id":context_id(path),"kind":Kind::Existing.name(),"path":path,"observed":true,
+        "description":"계획에 없는 기존 코드. 저장소의 import로 확인한 연결입니다.","interfaces":[],"files":[]
+    })).collect();
+    let edges = order.iter().enumerate().map(|(i, key)| json!({
+        "id":format!("observed-{}",i + 1),"from":key.0,"to":key.1,"type":"imports","uses":uses[key],"observed":true
+    })).collect();
+    (nodes, edges)
+}
+
+/// Converts a validated proposal into the plan document the client edits, and adds the unplanned
+/// code that the planned modules are connected to in the repository.
+pub fn to_plan(proposal: &Proposal, observed: &[ObservedImport]) -> Value {
+    let (context_nodes, context_edges) = surroundings(proposal, observed);
+    let mut nodes: Vec<Value> = proposal.modules.iter().map(|m| json!({
         "id":m.id,"name":m.name,"kind":m.kind.name(),"path":m.path(),"description":m.responsibility,
         "interfaces":m.interfaces.iter().map(|i| json!({"name":i.name,"kind":i.kind.name(),"condition":i.condition,"result":i.result,"inputs":i.inputs,"outputs":i.outputs})).collect::<Vec<_>>(),
         "files":m.files
     })).collect();
-    let edges: Vec<Value> = proposal.dependencies.iter().enumerate().map(|(i, d)| json!({
+    let mut edges: Vec<Value> = proposal.dependencies.iter().enumerate().map(|(i, d)| json!({
         "id":format!("dep-{}",i + 1),"from":d.from,"to":d.to,"type":"imports","uses":d.uses
     })).collect();
+    nodes.extend(context_nodes);
+    edges.extend(context_edges);
     json!({"schemaVersion":"0.3","version":1,"summary":proposal.summary,"nodes":nodes,"edges":edges,"requests":[]})
 }
 
@@ -521,6 +637,36 @@ mod tests {
         }).collect();
         serde_json::from_value(json!({"summary":"s","modules":modules,"dependencies":deps})).expect("fixture parses")
     }
+    fn import(from: &str, file: &str, to: &str, provider: &str, name: &str) -> ObservedImport {
+        ObservedImport { from: from.to_owned(), file: file.to_owned(), to: to.to_owned(), provider: provider.to_owned(), name: name.to_owned() }
+    }
+
+    #[test]
+    fn plan_shows_the_unplanned_code_around_changed_modules() {
+        let p = proposal(vec![module("filter", "modify", "features", Some("variant-filter"), "model")], vec![]);
+        let observed = vec![
+            // Uses an interface the changed module lists.
+            import("widgets/table/ui", "widgets/table/ui/Table.tsx", "features/variant-filter/model", "features/variant-filter/model/other.ts", "run_filter"),
+            // Uses something declared in the changed module's file.
+            import("pages/sample/ui", "pages/sample/ui/Page.tsx", "features/variant-filter/model", "features/variant-filter/model/a.ts", "FilterState"),
+            // Uses another file of the same segment, which the plan does not touch.
+            import("pages/other/ui", "pages/other/ui/Other.tsx", "features/variant-filter/model", "features/variant-filter/model/unrelated.ts", "unrelated"),
+            // The changed module's file imports unplanned code; another file of the segment does too.
+            import("features/variant-filter/model", "features/variant-filter/model/a.ts", "shared/lib", "shared/lib/date.ts", "formatDate"),
+            import("features/variant-filter/model", "features/variant-filter/model/unrelated.ts", "shared/ui", "shared/ui/Button.tsx", "Button"),
+        ];
+        let plan = to_plan(&p, &observed);
+        let ids = |key: &str| -> Vec<String> { plan[key].as_array().unwrap().iter().filter(|v| v["observed"] == true).map(|v| v["id"].as_str().unwrap().to_owned()).collect() };
+        assert_eq!(ids("nodes"), ["observed-widgets--table--ui", "observed-pages--sample--ui", "observed-shared--lib"]);
+        let edges: Vec<(String, String, String)> = plan["edges"].as_array().unwrap().iter()
+            .map(|e| (e["from"].as_str().unwrap().to_owned(), e["to"].as_str().unwrap().to_owned(), e["uses"][0].as_str().unwrap_or("").to_owned())).collect();
+        assert_eq!(edges, [
+            ("observed-widgets--table--ui".to_owned(), "filter".to_owned(), "run_filter".to_owned()),
+            ("observed-pages--sample--ui".to_owned(), "filter".to_owned(), "FilterState".to_owned()),
+            ("filter".to_owned(), "observed-shared--lib".to_owned(), "formatDate".to_owned()),
+        ]);
+    }
+
     /// Validates against a fake repository: `paths` are placements, and every placement holds a.ts.
     fn check(p: &Proposal, paths: &[&str]) -> Vec<String> {
         let paths: HashSet<String> = paths.iter().map(|p| (*p).to_owned()).collect();

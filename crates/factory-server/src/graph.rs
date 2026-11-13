@@ -8,6 +8,7 @@
 //! - An import of a slice's public API is traced through the index re-exports to the segment that
 //!   declares the imported name.
 use regex::Regex;
+use std::collections::BTreeMap;
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -33,6 +34,8 @@ const MAX_GROUP_DEPTH: usize = 6;
 const MAX_REEXPORT_DEPTH: usize = 10;
 /// How many untraced imports are listed in the analysis result, so the cause can be looked up.
 const MAX_UNRESOLVED_SAMPLES: usize = 50;
+/// Stands for "everything", where an import does not name what it takes (`import * as`, side-effect imports).
+pub const ALL_NAMES: &str = "*";
 
 fn is_ignored_dir(name: &str) -> bool { name.starts_with('.') || IGNORED_DIRS.contains(&name) }
 fn is_direct_layer(layer: &str) -> bool { layer == "app" || layer == "shared" }
@@ -83,6 +86,10 @@ fn normalize(path: &Path) -> PathBuf {
         }
     }
     out
+}
+/// A path as the plan writes it: relative to the source root, with forward slashes.
+fn relative(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
 }
 /// Resolves an extension-less module path to a file: `x.ts`, `x.tsx`, ..., or `x/index.ts`.
 fn resolve_module(path: &Path) -> Option<PathBuf> {
@@ -309,17 +316,26 @@ fn collect_exports(file: &Path, patterns: &Patterns, out: &mut Vec<(String, Path
         }
     }
     for cap in patterns.export_list.captures_iter(&text) {
-        // `export { a } from './x'` is provided by x; `export { a }` by this file.
-        let provider = cap.get(2).and_then(|spec| target_of(spec.as_str())).unwrap_or_else(|| file.to_path_buf());
-        out.extend(brace_names(&cap[1]).into_iter().map(|(_, exported)| (exported, provider.clone())));
+        // `export { a }` is provided by this file. `export { a } from './x'` is provided by whatever
+        // x says provides a, so a chain of re-exports ends at the file that declares the name.
+        let Some(target) = cap.get(2).and_then(|spec| target_of(spec.as_str())) else {
+            out.extend(brace_names(&cap[1]).into_iter().map(|(_, exported)| (exported, file.to_path_buf())));
+            continue;
+        };
+        let mut inner = vec![];
+        if let Some(module) = resolve_module(&target) { collect_exports(&module, patterns, &mut inner, &mut visited.clone(), depth + 1); }
+        for (original, exported) in brace_names(&cap[1]) {
+            let provider = inner.iter().find(|(name, _)| name == &original).map(|(_, provider)| provider.clone()).unwrap_or_else(|| target.clone());
+            out.push((exported, provider));
+        }
     }
     out.extend(patterns.export_decl.captures_iter(&text).map(|cap| (cap[1].to_owned(), file.to_path_buf())));
     if text.contains("export default") { out.push(("default".to_owned(), file.to_path_buf())); }
 }
 
-/// For one slice: which segment provides each name of its public API.
-fn public_api(slice: &Slice, entry: Option<&Path>, patterns: &Patterns) -> HashMap<String, BTreeSet<String>> {
-    let mut table: HashMap<String, BTreeSet<String>> = HashMap::new();
+/// For one slice: which segment, and which file in it, provides each name of its public API.
+fn public_api(slice: &Slice, entry: Option<&Path>, patterns: &Patterns, root: &Path) -> HashMap<String, BTreeSet<(String, String)>> {
+    let mut table: HashMap<String, BTreeSet<(String, String)>> = HashMap::new();
     let entry_file = match entry {
         Some(path) => resolve_module(path),
         None => index_file(&slice.dir),
@@ -334,7 +350,8 @@ fn public_api(slice: &Slice, entry: Option<&Path>, patterns: &Patterns) -> HashM
             // A file directly in the slice is a segment named after the file.
             .map(|first| if is_source_file(Path::new(&first)) { Path::new(&first).file_stem().unwrap_or_default().to_string_lossy().to_string() } else { first })
             .filter(|first| slice.segments.contains(first));
-        if let Some(segment) = segment { table.entry(name).or_default().insert(segment); }
+        let provider_file = relative(root, &resolve_module(&provider).unwrap_or_else(|| provider.clone()));
+        if let Some(segment) = segment { table.entry(name).or_default().insert((segment, provider_file)); }
     }
     table
 }
@@ -357,9 +374,10 @@ pub fn scan(repo: &Path) -> Result<Value, String> {
     }).collect();
 
     let patterns = Patterns::new()?;
-    let mut api_cache: HashMap<(usize, Option<PathBuf>), HashMap<String, BTreeSet<String>>> = HashMap::new();
-    let mut edge_keys: HashSet<(String, String)> = HashSet::new();
-    let mut edges = vec![];
+    let mut api_cache: HashMap<(usize, Option<PathBuf>), HashMap<String, BTreeSet<(String, String)>>> = HashMap::new();
+    // Per (importing node, imported node): every import as (importing file, name, providing file).
+    let mut edge_order: Vec<(String, String)> = vec![];
+    let mut edge_facts: HashMap<(String, String), BTreeSet<(String, String, String)>> = HashMap::new();
     let mut unresolved = 0usize;
     let mut unresolved_samples: Vec<Value> = vec![];
     let walker = WalkDir::new(&root).follow_links(false).max_depth(24).into_iter()
@@ -384,35 +402,51 @@ pub fn scan(repo: &Path) -> Result<Value, String> {
 
         for (spec, names) in imports {
             let Some(target_path) = scan.resolve_spec(file, &spec) else { continue; };
-            let targets: Vec<String> = match scan.locate(&target_path) {
-                Location::Node(path) => vec![path],
+            // Each target comes with what is imported from it: (name, file that provides the name).
+            let targets: Vec<(String, Vec<(String, String)>)> = match scan.locate(&target_path) {
+                Location::Node(path) => {
+                    let provider = relative(&root, &resolve_module(&target_path).unwrap_or_else(|| target_path.clone()));
+                    let listed = match &names { Names::All => vec![ALL_NAMES.to_owned()], Names::List(list) => list.clone() };
+                    vec![(path, listed.into_iter().map(|name| (name, provider.clone())).collect())]
+                }
                 Location::Api(index, entry) => {
                     let slice = &scan.slices[index];
-                    let api = api_cache.entry((index, entry.clone())).or_insert_with(|| public_api(slice, entry.as_deref(), &patterns));
-                    let segments: BTreeSet<&String> = match &names {
-                        Names::All => api.values().flatten().collect(),
-                        Names::List(list) => list.iter().filter_map(|name| {
-                            let found = api.get(name);
-                            if found.is_none() {
-                                unresolved += 1;
-                                if unresolved_samples.len() < MAX_UNRESOLVED_SAMPLES {
-                                    unresolved_samples.push(json!({"from":source,"import":spec,"name":name}));
+                    let api = api_cache.entry((index, entry.clone())).or_insert_with(|| public_api(slice, entry.as_deref(), &patterns, &root));
+                    let mut by_segment: BTreeMap<&String, Vec<(String, String)>> = BTreeMap::new();
+                    match &names {
+                        Names::All => for (segment, _) in api.values().flatten() {
+                            by_segment.entry(segment).or_insert_with(|| vec![(ALL_NAMES.to_owned(), String::new())]);
+                        },
+                        Names::List(list) => for name in list {
+                            match api.get(name) {
+                                Some(found) => for (segment, provider) in found { by_segment.entry(segment).or_default().push((name.clone(), provider.clone())); },
+                                None => {
+                                    unresolved += 1;
+                                    if unresolved_samples.len() < MAX_UNRESOLVED_SAMPLES {
+                                        unresolved_samples.push(json!({"from":source,"import":spec,"name":name}));
+                                    }
                                 }
                             }
-                            found
-                        }).flatten().collect(),
-                    };
-                    segments.into_iter().map(|segment| format!("{}/{}/{segment}", slice.layer, slice.rel.join("/"))).collect()
+                        },
+                    }
+                    by_segment.into_iter().map(|(segment, imported)| (format!("{}/{}/{segment}", slice.layer, slice.rel.join("/")), imported)).collect()
                 }
                 Location::Outside => vec![],
             };
-            for target in targets {
-                if target != source && edge_keys.insert((source.clone(), target.clone())) {
-                    edges.push(json!({"id":format!("observed-edge-{}",edge_keys.len()),"from":node_id(&source),"to":node_id(&target),"type":"imports","source":"import-scan"}));
-                }
+            let importing_file = relative(&root, file);
+            for (target, imported) in targets {
+                if target == source { continue; }
+                let key = (source.clone(), target);
+                if !edge_facts.contains_key(&key) { edge_order.push(key.clone()); }
+                edge_facts.entry(key).or_default().extend(imported.into_iter().map(|(name, provider)| (importing_file.clone(), name, provider)));
             }
         }
     }
+
+    let edges: Vec<Value> = edge_order.iter().enumerate().map(|(i, key)| {
+        let imports: Vec<Value> = edge_facts[key].iter().map(|(file, name, provider)| json!({"file":file,"name":name,"provider":provider})).collect();
+        json!({"id":format!("observed-edge-{}",i + 1),"from":node_id(&key.0),"to":node_id(&key.1),"type":"imports","source":"import-scan","imports":imports})
+    }).collect();
 
     let source_root = root.strip_prefix(repo).unwrap_or(&root).to_string_lossy().replace('\\', "/");
     Ok(json!({"schemaVersion":"0.3","version":1,"nodes":nodes,"edges":edges,"requests":[],"repository":repo.display().to_string(),

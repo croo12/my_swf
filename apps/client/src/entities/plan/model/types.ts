@@ -62,6 +62,11 @@ export interface PlanNode {
   files?: string[];
   /** What the module offers to other modules, and the requests it sends to the server. */
   interfaces: ModuleInterface[];
+  /**
+   * True for code the plan does not mention, added by the server because the repository's imports
+   * connect it to a planned module.
+   */
+  observed?: boolean;
 }
 
 export interface PlanEdge {
@@ -71,6 +76,8 @@ export interface PlanEdge {
   type: string;
   /** Names of the interfaces of `to` that `from` uses. */
   uses?: string[];
+  /** True for an import found in the repository, as opposed to one the plan proposes. */
+  observed?: boolean;
 }
 
 export interface PlanRequest {

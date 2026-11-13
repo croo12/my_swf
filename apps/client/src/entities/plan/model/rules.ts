@@ -86,6 +86,7 @@ export function normalizeImported(data: unknown): Plan {
           ? 'existing'
           : 'new',
       description: String(n.description ?? ''),
+      observed: n.observed === true,
       files: stringArray(n.files),
       interfaces: interfacesOf(
         n,
@@ -103,6 +104,7 @@ export function normalizeImported(data: unknown): Plan {
       to: String(e.to),
       type: String(e.type ?? 'uses'),
       uses: stringArray(e.uses),
+      observed: e.observed === true,
     }));
   return {
     version: Number(doc.version || 1),

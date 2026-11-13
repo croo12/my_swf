@@ -1982,3 +1982,24 @@ body {
 .server-chip {
   max-width: 380px;
 }
+
+/* Code the plan does not mention, connected to it by imports found in the repository. */
+.node[data-observed='true'] {
+  border-style: dotted;
+  background: #121b2a;
+  opacity: 0.85;
+}
+.node[data-observed='true'] .kindbadge {
+  background: #232a36;
+  color: #8493a8;
+}
+.node[data-observed='true'] .node-interfaces {
+  display: none;
+}
+.edges path.edge-path.observed {
+  stroke: #56657a;
+  stroke-dasharray: 2 5;
+}
+.edges path.edge-path.observed.active {
+  stroke: #b9a6ff;
+}
