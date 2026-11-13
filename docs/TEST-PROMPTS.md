@@ -1,40 +1,33 @@
-# Test prompts
+# Test prompts for gebra.v2-server
 
-Fixed planning requests for checking a release. Paste them into the request box unchanged, so results from different versions can be compared. A different wording gives a different plan, and then a change in the result cannot be attributed to the server.
+The planning requests entered in the app to plan against `gebra.v2-server` (FSD root `services/client/src`). Paste them into the request box unchanged. A different wording gives a different plan, and then a change in the result cannot be attributed to a change in the server.
 
 When a prompt has to change, add a new entry with a new id instead of editing an old one, and note in the log which id was used.
 
 ## Prompts
 
-### P1 — cancel a running job (this repository)
+Each entry: the exact text, whether the plan was empty, and the target (whole plan or a module).
 
-Repository: this project (`FACTORY_REPO_PATH` = this checkout). Plan: empty. Target: whole plan.
+### G1 — report sentence execution
 
-```text
-실행 중인 Herdr 계획 작업을 취소하는 기능을 추가해줘. 작업 상태 표시줄에 취소 버튼이 있어야 하고 서버에도 취소 API가 필요해.
-```
-
-What it exercises: a `modify` module in `features/plan-job`, a server request (`METHOD /path` interface) that must reach `shared/api`, and a widget that depends on the feature. The request also asks for a server API, which cannot be planned; the proposal must contain client modules only.
-
-### P2 — cancel a running job, short form (this repository)
-
-Repository: this project. Plan: empty. Target: whole plan.
+Plan: empty. Target: whole plan.
 
 ```text
-plan-job feature에 실행 중인 계획 작업을 취소하는 기능을 추가하는 계획을 세워줘
+(paste the exact request here)
 ```
 
-What it exercises: the same change named by its slice, without mentioning the server.
+## Requests already sent
 
-### P3 — report sentence execution (gebra.v2-server)
+The server keeps the text of every planning request. On Mac Studio, this prints them oldest first:
 
-Repository: `gebra.v2-server` on Mac Studio, FSD root `services/client/src`. Plan: empty. Target: whole plan.
-
-```text
-(not recorded yet: paste the exact request used on Mac Studio here)
+```sh
+source ~/.config/software-factory/server.env
+for f in $(ls -tr "$FACTORY_DATA_DIR"/jobs/*/input-plan.json); do
+  date -r "$f" '+%Y-%m-%d %H:%M'
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["instruction"])' "$f"
+  echo
+done
 ```
-
-What it exercises: several modules in one slice (`features/report-sentence`) and one widget (`widgets/ngs-report-editor`). The v0.1.6 answer to this request contained a types-only module, a public-API module that only re-exported, and outputs that restated interface names; from v0.1.7 these are rejected.
 
 ## Log
 
