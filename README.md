@@ -1,169 +1,93 @@
-# Software Factory · Planning Workbench
+# Planning Workbench · Native
 
-**v0.1 multi-platform source project** — Tauri 2 client (macOS / Windows / Android), Rust + Axum server (Mac Studio), and a real Herdr TUI / Codex planning adapter.
+사람이 직접 설계하고, 실제 저장소 구조를 보며 구현 계획을 작성하는 Windows / macOS 앱입니다.
+기존 화면의 어두운 색상, 레이어별 카드와 계획 캔버스를 Rust + egui/eframe으로 구현합니다. 네이티브 클라이언트는 WebView·Node·React 런타임을 사용하지 않습니다.
 
-This is a working *source starter*, not a prebuilt signed `.app`, `.msi`, or `.apk`. Build on the corresponding OS (Android builds additionally need Android SDK/NDK). The JavaScript syntax, package/config files, and mocked desktop/mobile UI interactions have been checked. Rust/Android compilation and live Herdr integration have **not** been verified in the artifact-generation environment.
+현재 범위는 **저장소 구조 탐색 → 수동 계획 편집 → JSON / Markdown 내보내기**입니다. AI 작업 실행은 연결하지 않았습니다.
 
-## Layout
+## 실행
 
-```text
-software-factory-multiplatform/
-├── apps/client/                 # One shared Planning Workbench UI (React + TypeScript, React Compiler)
-│   ├── src/                     # Feature-Sliced Design layers; imports only point downward
-│   │   ├── app/                 # Entry point and global styles
-│   │   ├── pages/workbench/     # The single screen, composed from widgets
-│   │   ├── widgets/             # workbench-header, repository-overview, plan-canvas, command-bar
-│   │   ├── features/            # edit-graph, record-request, analyze-repository, add-slice-to-plan, switch-view, connect-server, server-sync, plan-transfer, plan-job
-│   │   ├── entities/            # plan (schema, ELK layout, validation, stores, module/edge UI), repository (slice-level scan)
-│   │   └── shared/              # api (Factory transport), lib (store), ui (toast)
-│   ├── package.json             # Tauri / Vite commands, plus `npm run check` (tsc, oxlint, steiger, oxfmt)
-│   └── src-tauri/               # Native Rust client for macOS/Windows/Android
-├── crates/factory-server/
-│   └── src/
-│       ├── main.rs              # API, persistence, Herdr job execution
-│       └── graph.rs             # Filesystem FSD structure/import scanner
-├── scripts/macos/              # launchd helper
-└── docs/                        # Architecture and API
-```
-
-## A. Start the app on your MacBook (UI works without a server)
-
-Prerequisites: Node 20+, Rust (rustup), Xcode Command Line Tools and macOS Tauri system dependencies. Follow [official Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your machine.
+Rust 1.95 이상이 필요합니다. Windows에는 MSVC C++ Build Tools, macOS에는 Xcode Command Line Tools가 필요합니다.
 
 ```sh
-unzip software-factory-multiplatform.zip
-cd software-factory-multiplatform/apps/client
-npm install
-npm run desktop
+# 프로젝트 루트에서 실행
+cargo run -p factory-workbench --release
+
+# 실행하면서 분석할 저장소 지정 (공백이 있는 경로는 따옴표로 감싸세요)
+cargo run -p factory-workbench --release -- /path/to/your/repository
+
+# 독립 실행 파일 빌드
+cargo build -p factory-workbench --release --locked
 ```
 
-The **Software Factory** window opens. It contains the existing v0.3 FSD-layer graph, node/I-O editor, and JSON import/export. You can use these locally while the Mac Studio server is offline.
+Windows 실행 파일은 `target/release/factory-workbench.exe`, macOS 실행 파일은 `target/release/factory-workbench`입니다. 앱을 실행한 뒤 **폴더 열기**로 로컬 저장소를 선택할 수도 있습니다. 로컬 분석에는 서버나 AI 계정이 필요하지 않습니다.
 
-Build a standalone macOS application:
+Windows에서 빌드·실행을 확인합니다. macOS는 동일 소스와 CI 빌드 경로를 제공하며, 이 Windows 작업 환경에서는 macOS 실행을 검증하지 않습니다. 릴리스 태그 빌드는 Windows ZIP과 macOS universal `.app` ZIP을 생성합니다. 배포용 코드 서명·공증은 별도입니다.
+
+## 저장소 구조 보기
+
+1. FSD 저장소를 엽니다. 모노레포 안에서도 소스 루트를 찾습니다. 직접 지정하려면 `FACTORY_SOURCE_ROOT`를 저장소 기준 상대 경로로 설정합니다.
+2. **의존 관계 그래프 안에서 Layer → Slice → 내부 폴더 / index 그룹 → 하위 그룹·파일** 순서로 노드를 펼칩니다. 펼친 부모 박스 안에 자식 노드가 나타나며 다른 레이어·형제 노드와 연결선도 같은 캔버스에 유지됩니다. `app`과 `shared`는 FSD 특성상 slice 없이 내부 그룹을 펼칩니다.
+3. 펼친 그룹의 제목을 누르면 접힙니다. 접힌 그룹의 외부 import는 그룹 경계에 모이고, 펼치면 실제 내부 노드로 연결됩니다. **Layer 보기 / Slice 보기**, 확대 도구, 스크롤로 탐색합니다. 검색 결과나 의존 대상 파일을 선택하면 필요한 상위 그룹을 펼쳐 그래프에서 해당 위치를 보여줍니다. Shift+클릭은 펼침 상태를 바꾸지 않고 관계만 선택합니다.
+4. `index` 배지는 `index.ts`, `index.tsx`, `index.js` 등의 공개 진입점이 있는 디렉터리를 뜻합니다. 일반 폴더도 실제 계층을 유지하며 표시합니다.
+5. 연결선에 마우스를 올리면 import 이름과 파일 관계 수를 확인합니다. 오른쪽에서는 선택한 그룹의 파일 목록과 경계를 넘는 실제 import 관계를 봅니다. **이 그룹을 계획에 추가**로 세그먼트·그룹·파일을 계획에 복사합니다.
+
+구조 탐색은 저장소를 읽기만 합니다. `git pull`이나 소스 변경은 수행하지 않습니다. 분석은 기존 정적 스캐너를 공유하며 TypeScript AST 분석은 아닙니다. 상대 import, `@/`, FSD 레이어 별칭과 index 재노출을 추적하지만 모든 tsconfig 별칭이나 런타임 의존성을 해석하지는 않습니다. 확인하지 못한 import 수를 하단에 표시합니다. 타입과 동작은 사람이 직접 작성합니다.
+
+## 계획 작성과 내보내기
+
+- **계획**에서 모듈을 추가하고 책임, 신규 / 수정 / 기존 참조, 배치, 파일, 인터페이스의 조건·결과·입력·출력을 편집합니다.
+- 모듈을 선택하고 오른쪽에서 의존 대상을 골라 연결합니다. 관계 종류와 사용하는 인터페이스도 편집합니다. 삭제와 변경은 되돌리기 / 다시 실행이 가능합니다.
+- **내보내기 → JSON**은 재편집용 원본입니다. 기존 Tauri 클라이언트의 JSON도 불러올 수 있습니다.
+- **내보내기 → Markdown**은 사람이 작성한 계획을 AI에 전달하기 위한 문서입니다. 클립보드로 복사할 수도 있습니다.
+- `Ctrl+S` / `⌘S`로 JSON 내보내기, 편집 필드 밖에서 `Ctrl+Z` / `⌘Z`로 그래프 되돌리기, Shift를 함께 누르면 다시 실행합니다. 텍스트 필드 안에서는 일반 텍스트 편집 단축키가 동작합니다.
+
+작성 중인 계획은 사용자 폴더의 `SoftwareFactoryNative/session.json`에 자동 저장됩니다. Windows에서는 `%LOCALAPPDATA%`, macOS에서는 `~/Library/Application Support` 아래입니다. 손상된 저장본은 자동으로 덮어쓰지 않으며 오류를 표시합니다. 기존 WebView의 localStorage는 자동 이관하지 않으므로 기존 앱에서 JSON을 내보낸 뒤 가져오세요.
+
+## 원격 저장소
+
+기존 Factory 서버 자원을 그대로 활용할 수 있습니다. 이 버전의 서버를 실행하고 네이티브 앱의 **원격 저장소**에서 HTTPS 주소와 API 토큰을 입력합니다. 로컬 테스트용 HTTP는 loopback에서만 허용합니다.
 
 ```sh
-npm run desktop:build
-# or: npm run tauri -- build --bundles app
-```
-
-## B. Start the server on Mac Studio
-
-Copy/clone the same project on Mac Studio. Install Rust, Git, Herdr TUI and Codex CLI. **Log Codex into the existing ChatGPT subscription as the same macOS user that runs Herdr.**
-
-Use your actual work repository path (must be a Git repository for AI jobs). On Mac Studio, in **Terminal 1** start the Herdr runtime:
-
-```sh
-herdr server
-```
-
-In **Terminal 2**, configure and start the Factory API:
-
-```sh
-cd software-factory-multiplatform
-export FACTORY_REPO_PATH="$HOME/projects/my-react-project"
-export FACTORY_DATA_DIR="$PWD/data"
-export FACTORY_API_TOKEN="$(openssl rand -hex 32)"
-export FACTORY_BIND="127.0.0.1:8787"
-echo "Save this API token securely: $FACTORY_API_TOKEN"
+export FACTORY_REPO_PATH=/path/to/repository
+export FACTORY_API_TOKEN=your-random-secret-at-least-24-characters
+export FACTORY_DATA_DIR=./data
 cargo run -p factory-server --release
 ```
 
-**Keep the token**; enter exactly the same value in the Tauri app's `⚙ 서버 연결` dialog. Never commit the token. For a persistent setup, see the optional launchd helper below.
+Windows PowerShell에서는 `export NAME=value` 대신 `$env:NAME = 'value'`를 사용하세요. 서버는 기본적으로 `127.0.0.1:8787`에 바인딩합니다. 원격 접속에는 기존 Tailscale Serve 구성을 사용할 수 있습니다.
 
-Herdr CLI is controlled by the server (`workspace create`, `agent start`, `agent prompt --wait`). If `herdr` isn't on the launchd PATH, set `HERDR_BIN` to its **absolute path**. The server and `herdr server` must run under the same user/session. Check `herdr status server` before running AI jobs.
+네이티브 앱은 `GET /api/repository/tree`만 호출합니다. 토큰 기억을 선택하면 연결 성공 후 Windows Credential Manager / macOS Keychain에 보관하며, 계획 JSON이나 자동 저장 파일에는 토큰을 기록하지 않습니다. 기존 Tauri 앱이 저장한 토큰을 읽는 버튼도 있습니다.
 
-### Secure networking without manually opening an SSH tunnel
+## 코드 구성
 
-On Mac Studio, if both machines are on the same tailnet, run:
+```text
+apps/native/                  Rust 네이티브 클라이언트
+  src/app.rs                  화면 구성, 탐색, 수동 편집, 파일 작업
+  src/canvas.rs               기존 스타일의 카드와 레이어별 계획 그래프
+  src/repository_graph.rs     그룹 안에서 펼치고 접는 중첩 저장소 그래프
+  src/routing.rs              노드와 그룹 제목을 우회하는 직교 연결선
+  src/storage.rs              로컬 초안 자동 저장
+  src/transport.rs            선택적인 원격 구조 조회 / OS 토큰 저장
+crates/factory-core/          클라이언트와 서버가 공유하는 Rust 코드
+  src/graph.rs                기존 FSD / import 스캐너
+  src/repository.rs           재귀 계층, index 그룹, 그룹 경계의 import 관계
+  src/repository_graph.rs     펼침 상태에 따른 그래프와 import 집계
+  src/plan.rs                 계획 JSON 호환, 기본 무결성 검사, Markdown 출력
+crates/factory-server/        기존 Axum 서버 + 읽기 전용 계층 API
+apps/client/                  기존 Tauri / React UI와 아이콘 (이전 버전 참고용)
+scripts/macos/                서버 운영 스크립트와 네이티브 .app 패키징
+```
+
+화면 공용 코드에 Windows/macOS API를 섞지 않고 저장·통신을 분리했습니다. Android 패키징과 작은 화면용 UI는 후속 범위입니다. Android 앱 빌드가 제공되는 것은 아닙니다.
+
+## 확인
 
 ```sh
-tailscale serve --bg 8787
-tailscale serve status
+cargo test -p factory-core -p factory-server --locked
+cargo clippy -p factory-workbench --locked -- -D warnings
+cargo fmt -p factory-workbench -- --check
+cargo build -p factory-workbench --release --locked
 ```
 
-The command displays an HTTPS hostname like `https://mac-studio.example.ts.net`. This is **Tailscale Serve, not Funnel**. On MacBook, open `⚙ 서버 연결`, enter that HTTPS hostname and `FACTORY_API_TOKEN`, then click **연결 확인**. If Serve prompts you to enable HTTPS certificates on the tailnet, follow that setup.
-
-The server binds only to loopback by default, requires a bearer token for every API route and can be accessed over Tailscale Serve. The desktop app keeps the token in the OS credential store (Windows Credential Manager / macOS Keychain), so you enter it once; the URL is saved locally. In a plain browser or on Android the token lasts only for the session.
-
-## C. Using Planning
-
-The app has two views, switched in the header.
-
-**저장소 (repository)** is a read-only overview of what exists. `서버 ▾ → 저장소 분석` makes the server read the real FSD layout and the imports it can resolve, and shows them at slice level. Select a slice to see what it uses and what uses it. Nothing can be edited here, and analysis never changes the plan.
-
-**계획 (plan)** is where work is designed. A plan starts empty: it holds the modules to build or change, and where each one is placed.
-
-1. Write what you want built in the request box and press `✦ 계획 요청`. The server runs Codex in a Herdr workspace, read-only, and asks for the modules: a one-sentence responsibility, its interfaces (what it offers to other modules and the requests it sends to the server, each with a kind, a condition and a result, and typed inputs and outputs), placement (layer / slice / segment), files, and dependencies.
-2. The answer is constrained to a JSON Schema and then checked by the server against fixed rules and against the repository (see `docs/ARCHITECTURE.md`). **A proposal that breaks any rule is rejected as a whole.** The violations are sent back to Codex for up to three attempts in total; if the last one is still rejected, the job fails and reports every violation. Nothing is repaired or guessed by the server.
-3. The server then adds the code around the plan: files the plan does not mention that import from a planned module, and what a changed module's files import. These are read from the repository's imports, not written by the AI. They appear as dotted `계획 밖` cards and dotted lines, with the imported names on the line, so you can see what a change is connected to. A connection is shown only when it involves a file the planned module lists or an interface it names; modules marked new have no files yet, so only uses of the names they list are found.
-4. A proposal that passes shows `제안 그래프 적용`. **No AI output changes your plan by itself**; you accept it explicitly, and you can undo it.
-5. Edit modules on the canvas: click to edit, drag into another layer to change the placement. `＋ 모듈` adds a module by hand. The graph is laid out automatically (ELK): only the layers the plan touches are shown, relations are drawn as orthogonal lines, and selecting a module highlights its relations. Requests to the server appear as a server box below the layers, reached from the `shared/api` modules.
-6. `서버 ▾ → 서버에 저장` then `계획 승인` creates an immutable timestamped snapshot under `data/approved/`.
-
-A request is addressed to the selected module or to the whole plan; the target is shown next to the request box.
-
-Before a planning job and before a repository analysis, the server runs `git pull --ff-only` in its repository, so both are based on the newest code of the checked-out branch. Keep that checkout for planning only: Codex runs with a read-only sandbox and never changes it. If the pull fails (no network, no upstream, local commits), the job continues on the existing checkout and says so. The header chip and the job status show the branch and commit in use. Only client code inside the FSD layers can be planned; the answer schema has no way to express other code. The Herdr workspace of each job is kept for inspection.
-
-## D. Windows client
-
-Copy/clone the same project to Windows, install Rust / Visual Studio C++ Build Tools / WebView2 and Node according to [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/):
-
-```powershell
-cd software-factory-multiplatform\apps\client
-npm install
-npm run desktop          # development
-npm run desktop:build    # Windows installer from Windows host
-```
-
-Connect the Windows Tauri app to the **same Mac Studio** over the Windows Tailscale client. You do not need Herdr installed on Windows.
-
-## E. Android client
-
-Install Android Studio, Java, Android SDK/NDK and Rust Android targets using [Tauri's Android instructions](https://v2.tauri.app/start/prerequisites/). From a configured macOS / Windows / Linux development machine:
-
-```sh
-cd software-factory-multiplatform/apps/client
-npm install
-npm run android:init     # generates native Android project, once
-npm run android:dev      # emulator or connected Android device
-npm run android:build    # APK; signing required for distribution
-```
-
-Install and connect **Tailscale for Android** on the phone. Enter the Mac Studio's Tailscale Serve **HTTPS** URL in the app. The same graph UI is horizontally scrollable on smaller screens; a tablet/landscape orientation is more comfortable. Android acts as a remote **client**: Rust Factory and Herdr execute on Mac Studio, never on the phone.
-
-## F. Mac Studio server from releases, with automatic updates (optional)
-
-Instead of building on Mac Studio, run the server binary published with each GitHub Release. Mac Studio checks for a new release every 5 minutes and switches to it, so **pushing a release tag deploys the server**. Mac Studio pulls the release; nothing connects in from GitHub. Rust and a clone of this repository are not needed.
-
-One-time setup on Mac Studio (Apple Silicon):
-
-```sh
-mkdir -p ~/.config/software-factory
-curl -fsSL https://raw.githubusercontent.com/croo12/my_swf/main/scripts/macos/server.env.example -o ~/.config/software-factory/server.env
-# Edit server.env: set FACTORY_REPO_PATH, FACTORY_DATA_DIR, and a FACTORY_API_TOKEN from `openssl rand -hex 32`.
-
-curl -fsSL https://raw.githubusercontent.com/croo12/my_swf/main/scripts/macos/release-server.sh -o /tmp/release-server.sh
-bash /tmp/release-server.sh install
-```
-
-This installs the latest release to `~/.local/share/software-factory-server/` and two user LaunchAgents: the server itself, and the update check. Settings stay in `server.env` and are never touched by updates.
-
-- An update waits while a planning job is running, because restarting the server orphans the job.
-- The previous binary is kept as `factory-server.previous` next to the current one.
-- Logs are in `~/Library/Logs/SoftwareFactory/`.
-- `bash ~/.local/share/software-factory-server/bin/release-server.sh update` checks immediately; `uninstall` removes both LaunchAgents.
-
-**Herdr still needs its own supervised `herdr server` process** under the same user for automated plans. Start that separately or manage it with your own launchd service; don't run two copies of the same Herdr session.
-
-To build from source on Mac Studio instead, use `./scripts/macos/install-server-launchd.sh` from a clone. Both scripts register the same server LaunchAgent, so use one or the other.
-
-## Current limits
-
-- No verified production build / code signing in this delivery environment.
-- One selected repository per server instance; not a general project registry yet.
-- The static scanner works on text patterns, not a TypeScript AST. It finds the FSD source root inside the repository (set `FACTORY_SOURCE_ROOT`, relative to the repository, to choose it yourself), treats the first folder below a layer that has an index file as the slice, and resolves relative imports, `@/`, and layer aliases such as `@features/...`. Imports of a slice's public API are traced through its index re-exports to a segment; names it cannot trace are counted in `analysis.unresolvedImports` and produce no edge. Other `tsconfig` aliases, package exports, and type resolution are not handled.
-- Validation guarantees the shape of a proposal and its consistency with the repository, not its architectural quality. An accepted proposal replaces the whole plan *only after human approval*; there is no minimal patch/diff merge yet. The checks on wording are structural (length, one sentence, typed inputs and outputs); they do not judge whether a sentence is clear.
-- Job status is persisted, but running jobs are **not resumed after a Factory server restart**; inspect interrupted jobs in Herdr. Old Herdr workspaces are not closed automatically.
-- No rich multiuser edit conflict management, push/PR integration, or delivery stage yet.
-
-See `docs/ARCHITECTURE.md` for the stage contract and API endpoints.
+[현재 구조와 데이터 흐름](docs/ARCHITECTURE.md), [이전 Tauri 실행 안내](docs/LEGACY-TAURI.md), [이전 AI 계획 생성 계약](docs/LEGACY-PLANNING.md).

@@ -2,7 +2,7 @@ name: Release
 
 # Push a tag like v0.1.0 to build and publish a GitHub Release.
 # Builds are unsigned: Windows shows a SmartScreen warning and macOS requires "Open Anyway".
-# Android is not built here yet (needs a signing keystore in repository secrets).
+# Android packaging for the new native UI is a later stage.
 on:
   push:
     tags: ["v*"]
@@ -27,7 +27,7 @@ jobs:
         run: gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Software Factory $TAG" --generate-notes
 
   client:
-    name: client (${{ matrix.name }})
+    name: native client (${{ matrix.name }})
     needs: create-release
     strategy:
       fail-fast: false
@@ -36,32 +36,32 @@ jobs:
           - name: macOS universal
             os: macos-latest
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-            args: --target universal-apple-darwin
           - name: Windows x64
             os: windows-latest
             rust-targets: ""
-            args: ""
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: apps/client/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-targets }}
-      - name: Install client dependencies
-        working-directory: apps/client
-        run: npm ci
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: apps/client
-          tagName: ${{ github.ref_name }}
-          args: ${{ matrix.args }}
+      - name: Build Windows client
+        if: runner.os == 'Windows'
+        run: cargo build -p factory-workbench --release --locked
+      - name: Package Windows client
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = "factory-workbench-${env:TAG}-windows-x64.zip"
+          Compress-Archive -LiteralPath target/release/factory-workbench.exe,README.md,docs -DestinationPath $archive
+          gh release upload $env:TAG $archive --clobber
+      - name: Build macOS universal client
+        if: runner.os == 'macOS'
+        run: |
+          cargo build -p factory-workbench --release --locked --target aarch64-apple-darwin
+          cargo build -p factory-workbench --release --locked --target x86_64-apple-darwin
+          bash scripts/macos/package-native.sh "$TAG"
+          gh release upload "$TAG" "target/Planning-Workbench-${TAG}-macos-universal.zip" --clobber
 
   server:
     name: server (${{ matrix.target }})

@@ -1,4 +1,4 @@
-mod graph;
+use factory_core::{graph, repository};
 mod planner;
 
 use std::{collections::{HashMap, HashSet}, env, path::{Path, PathBuf}, sync::Arc, time::{SystemTime, UNIX_EPOCH, Duration}};
@@ -49,6 +49,38 @@ fn auth(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
     let supplied = headers.get(AUTHORIZATION).and_then(|x| x.to_str().ok()).and_then(|x| x.strip_prefix("Bearer "));
     if supplied != Some(state.api_token.as_str()) { return Err(err(StatusCode::UNAUTHORIZED, "Invalid factory API token")); }
     Ok(())
+}
+
+#[cfg(test)]
+mod repository_api_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn hierarchy_requires_auth_and_reads_nested_groups_without_writing() {
+        let fixture = tempfile::tempdir().unwrap();
+        let source = fixture.path().join("src/features/cart/model/actions");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(fixture.path().join("src/shared/lib")).unwrap();
+        let index = fixture.path().join("src/features/cart/index.ts");
+        std::fs::write(&index, "export { add } from './model/actions';").unwrap();
+        std::fs::write(source.join("index.ts"), "export const add = () => 1;").unwrap();
+        std::fs::write(fixture.path().join("src/shared/lib/index.ts"), "export const value = 1;").unwrap();
+        let state = Arc::new(AppState {
+            repository: fixture.path().into(), data_dir: fixture.path().join("unused-data"),
+            herdr_bin: String::new(), api_token: "test-fixture-token-not-a-credential".into(),
+            guard: Arc::new(Mutex::new(())), jobs: Arc::new(Mutex::new(HashMap::new())),
+        });
+        let denied = repository_tree(State(state.clone()), HeaderMap::new()).await.unwrap_err();
+        assert_eq!(denied.0, StatusCode::UNAUTHORIZED);
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Bearer test-fixture-token-not-a-credential".parse().unwrap());
+        let Json(response) = repository_tree(State(state), headers).await.unwrap();
+        let snapshot: repository::Snapshot = serde_json::from_value(response).unwrap();
+        assert_eq!(snapshot.source_root, "src");
+        assert_eq!(snapshot.tree.find("features/cart/model/actions").unwrap().kind, "group");
+        assert!(!fixture.path().join("unused-data").exists());
+        assert_eq!(std::fs::read_to_string(index).unwrap(), "export { add } from './model/actions';");
+    }
 }
 fn validate_plan(plan: &Value) -> Result<(), ApiError> {
     let nodes = plan.get("nodes").and_then(Value::as_array).ok_or_else(||err(StatusCode::BAD_REQUEST,"nodes array required"))?;
@@ -166,6 +198,15 @@ async fn analyze(State(s):State<Arc<AppState>>,headers:HeaderMap)->ApiResult {
     // The per-import records are for building plans; the overview only needs which node imports which.
     if let Some(fields)=plan.as_object_mut() {fields.remove("records");}
     Ok(Json(json!({"plan":plan,"git":git_state(&s.repository).await,"pullError":pull_error})))
+}
+/// Browse the checked-out tree without pulling or changing the repository.
+async fn repository_tree(State(s):State<Arc<AppState>>,headers:HeaderMap)->ApiResult {
+    auth(&headers,&s)?;
+    let repo=s.repository.clone();
+    let snapshot=tokio::task::spawn_blocking(move||repository::analyze(&repo)).await
+        .map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,e))?
+        .map_err(|e|err(StatusCode::UNPROCESSABLE_ENTITY,e))?;
+    Ok(Json(serde_json::to_value(snapshot).map_err(|e|err(StatusCode::INTERNAL_SERVER_ERROR,e))?))
 }
 /// Scans the repository as it is now. Plans are checked against the checkout the server has; the
 /// pull happens when the repository is analyzed or a job starts.
@@ -476,6 +517,7 @@ async fn main()->Result<(),Box<dyn std::error::Error>> {
         .route("/api/plan",get(get_plan).put(put_plan))
         .route("/api/approve",post(approve))
         .route("/api/repository/analyze",post(analyze))
+        .route("/api/repository/tree",get(repository_tree))
         .route("/api/repository/modules",post(slice_modules))
         .route("/api/plan/check",post(check_plan))
         .route("/api/jobs",post(start_job))

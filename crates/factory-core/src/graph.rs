@@ -17,6 +17,9 @@ use std::{
 };
 use walkdir::WalkDir;
 
+type PublicApi = HashMap<String, BTreeSet<(String, String)>>;
+type ImportFacts = BTreeSet<(String, String, String)>;
+
 const LAYERS: &[&str] = &["app", "pages", "widgets", "features", "entities", "shared"];
 const SOURCE_EXTS: &[&str] = &["ts", "tsx", "js", "jsx", "mts", "mjs"];
 /// Folder names that mark their parent as a slice even when it has no index file.
@@ -134,6 +137,16 @@ struct Slice {
     rel: Vec<String>,
     dir: PathBuf,
     segments: Vec<String>,
+}
+
+/// Share the scanner's slice boundaries with the recursive repository browser.
+pub(crate) fn source_layout(repo: &Path) -> Result<(PathBuf, Vec<String>), String> {
+    let root = find_source_root(repo)?;
+    let layout = Scan::discover(&root);
+    let slices = layout.slices.iter()
+        .map(|slice| format!("{}/{}", slice.layer, slice.rel.join("/")))
+        .collect();
+    Ok((root, slices))
 }
 
 enum Location {
@@ -374,10 +387,10 @@ pub fn scan(repo: &Path) -> Result<Value, String> {
     }).collect();
 
     let patterns = Patterns::new()?;
-    let mut api_cache: HashMap<(usize, Option<PathBuf>), HashMap<String, BTreeSet<(String, String)>>> = HashMap::new();
+    let mut api_cache: HashMap<(usize, Option<PathBuf>), PublicApi> = HashMap::new();
     // Per (importing node, imported node): every import as (importing file, name, providing file).
     let mut edge_order: Vec<(String, String)> = vec![];
-    let mut edge_facts: HashMap<(String, String), BTreeSet<(String, String, String)>> = HashMap::new();
+    let mut edge_facts: HashMap<(String, String), ImportFacts> = HashMap::new();
     // Imports between files of one node. They make no edge, but they connect the modules inside it.
     let mut internal: BTreeMap<String, BTreeSet<(String, String, String)>> = BTreeMap::new();
     let mut unresolved = 0usize;
@@ -462,7 +475,7 @@ pub fn scan(repo: &Path) -> Result<Value, String> {
 }
 
 /// What kind of interface a declared name is, judged from its declaration and its name.
-fn interface_kind(keyword: &str, name: &str, value: &str, file: &str) -> &'static str {
+pub(crate) fn interface_kind(keyword: &str, name: &str, value: &str, file: &str) -> &'static str {
     let is_markup = file.ends_with(".tsx") || file.ends_with(".jsx");
     let mut chars = name.chars();
     let (first, second) = (chars.next().unwrap_or('_'), chars.nth(2).unwrap_or('_'));

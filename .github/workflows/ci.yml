@@ -31,4 +31,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       # Includes the tests of the proposal validator.
-      - run: cargo test -p factory-server --locked
+      - run: cargo test -p factory-core -p factory-server --locked
+
+  native:
+    name: native (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt -p factory-workbench -- --check
+      - run: cargo clippy -p factory-workbench --locked -- -D warnings
+      - run: cargo test -p factory-core -p factory-workbench --locked
+      - run: cargo build -p factory-workbench --release --locked

@@ -1,5 +1,5 @@
 [workspace]
 resolver = "2"
-members = ["crates/factory-server"]
-# Tauri uses its own target-specific build graph (macOS / Windows / Android).
+members = ["crates/factory-core", "crates/factory-server", "apps/native"]
+# The previous WebView client is retained as a UI reference and for JSON migration.
 exclude = ["apps/client/src-tauri"]

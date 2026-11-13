@@ -1,0 +1,16 @@
+[package]
+name = "factory-workbench"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.95"
+
+[dependencies]
+factory-core = { path = "../../crates/factory-core" }
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard", "system_fonts", "accesskit", "x11", "wayland"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = "0.17"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+keyring = { version = "3", features = ["windows-native", "apple-native"] }
