@@ -59,7 +59,7 @@ fn headless_autosave_and_restart_use_only_the_injected_profile() {
     driver.click("features/cart/model 선택");
     driver.replace("이름", "Persisted cart");
     let deadline = Instant::now() + Duration::from_secs(5);
-    while crate::storage::load(&driver.session_file)
+    while factory_session::load(&driver.session_file)
         .unwrap()
         .plan
         .nodes[0]

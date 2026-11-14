@@ -3,8 +3,6 @@ mod app;
 mod canvas;
 mod file_access;
 mod repository_graph;
-mod storage;
-mod transport;
 
 #[cfg(test)]
 #[path = "../build_support/source_limits.rs"]
@@ -33,7 +31,11 @@ fn main() -> eframe::Result {
     if args.get(1).map(String::as_str) == Some("--compare-layout") {
         match (args.get(2), args.get(3)) {
             (Some(repository), Some(output)) => {
-                if let Err(error) = repository_graph::compare(repository.as_ref(), output.as_ref())
+                if let Err(error) =
+                    factory_layout_comparison::run(repository.as_ref(), output.as_ref(), |path| {
+                        let [r, g, b, _] = canvas::layer_color(path).to_array();
+                        [r, g, b]
+                    })
                 {
                     eprintln!("{error}");
                     std::process::exit(1);

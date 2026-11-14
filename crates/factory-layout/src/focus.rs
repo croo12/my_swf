@@ -1,4 +1,4 @@
-use factory_core::repository_graph::{Edge, Graph};
+use factory_repository::projection::{Edge, Graph};
 use std::collections::BTreeSet;
 
 pub fn inside(path: &str, group: &str) -> bool {
@@ -6,7 +6,7 @@ pub fn inside(path: &str, group: &str) -> bool {
 }
 
 pub fn is_layer(path: &str) -> bool {
-    factory_core::repository::LAYERS.contains(&path)
+    factory_repository::LAYERS.contains(&path)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

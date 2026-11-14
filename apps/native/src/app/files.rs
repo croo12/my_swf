@@ -1,7 +1,7 @@
 use super::*;
 use crate::file_access::Selection;
-use crate::transport;
-use factory_core::repository;
+use factory_remote_repository::{self as remote, credentials};
+use factory_repository as repository;
 impl Workbench {
     pub(super) fn open_repository(&mut self, ctx: egui::Context, path: Option<PathBuf>) {
         if self.busy {
@@ -36,9 +36,9 @@ impl Workbench {
         );
         let sender = self.sender.clone();
         std::thread::spawn(move || {
-            let result = transport::repository(&server, &token).and_then(|snapshot| {
+            let result = remote::fetch(&server, &token).and_then(|snapshot| {
                 if remember {
-                    transport::token(false, &token)?;
+                    credentials::save_token(&token)?;
                 }
                 Ok(snapshot)
             });

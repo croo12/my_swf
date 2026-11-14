@@ -1,5 +1,5 @@
 use super::*;
-use factory_core::repository::Entry;
+use factory_repository::Entry;
 impl Workbench {
     pub(super) fn navigate(&mut self, path: &str) {
         self.inspected_path = path.into();
@@ -65,7 +65,9 @@ impl Workbench {
                                 }
                                 ui.add_space(8.0);
                                 let valid_module = Plan {
-                                    nodes: vec![snapshot.module(entry)],
+                                    nodes: vec![factory_plan::Node::from_repository(
+                                        &snapshot, entry,
+                                    )],
                                     ..Default::default()
                                 }
                                 .errors()

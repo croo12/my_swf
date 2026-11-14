@@ -12,10 +12,11 @@ use crate::{
     canvas::{self, ACCENT, BACKGROUND, BORDER, MUTED, PANEL, TEXT},
     file_access::FileAccess,
     repository_graph,
-    storage::Session,
 };
 use eframe::egui::{self, Color32, RichText};
-use factory_core::{plan::Plan, repository::Snapshot};
+use factory_plan::Plan;
+use factory_repository::Snapshot;
+use factory_session::Session;
 use std::{
     path::PathBuf,
     sync::{Arc, mpsc},

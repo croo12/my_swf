@@ -89,10 +89,24 @@ apps/native/                  Rust 네이티브 클라이언트
   src/app/                   앱 상태, 계획 편집, 저장소 탐색, 파일·연결 작업
   src/app/tests/             창 없이 실제 앱을 조작하는 egui_kittest 회귀 테스트
   src/canvas/                카드, 계획 그래프, 커서 기준 확대·축소
-  src/repository_graph/      중첩 그래프 UI, 비동기 작업, 그리기와 비교 CLI
+  src/repository_graph/      중첩 그래프 UI, 계산 결과 반영과 그리기
   src/file_access.rs         파일 선택기와 자동 저장 경로의 주입 경계
-  src/storage.rs              로컬 초안 자동 저장
-  src/transport.rs            선택적인 원격 구조 조회 / OS 토큰 저장
+apps/server/                  원격 저장소 API와 기존 계획 API 실행 프로그램
+  src/main.rs                설정과 서버 시작
+  src/api.rs                 HTTP 라우터와 읽기 전용 저장소 조회
+  src/legacy/                기존 계획 저장·검사·승인과 AI 작업
+  src/legacy/planner/        계획 자료형·변환·검증과 테스트
+crates/factory-repository/    저장소 구조와 import 관계 관찰
+  src/graph/                 경로 탐색, 슬라이스 발견, import 추적과 분석 결과
+  src/tree.rs                재귀 계층, index 그룹과 경계의 import 관계
+  src/projection.rs          펼침 상태에 따른 그래프와 import 집계
+crates/factory-plan/          사용자가 작성하는 계획
+  src/lib.rs                 계획 자료형, JSON 호환, 무결성 검사와 Markdown 출력
+  src/repository.rs          실제 저장소 그룹을 계획 모듈로 가져오기
+crates/factory-session/       작업 세션 저장·복원과 OS별 기본 경로
+crates/factory-remote-repository/  원격 저장소 연결
+  src/lib.rs                 HTTPS 조회와 인증·리다이렉트 정책
+  src/credentials.rs         OS 자격 증명 저장소의 API 토큰
 crates/factory-layout/        UI와 독립적인 그래프 배치·연결선 계산
   src/scene.rs               화면에 전달할 카드·연결선 좌표
   src/arrangement.rs         한 줄 계층 배치와 선택 카드 정렬
@@ -101,14 +115,12 @@ crates/factory-layout/        UI와 독립적인 그래프 배치·연결선 계
   src/elk_routing.rs         고정 카드 구조의 ELK Libavoid 연결선
   src/embedded_router.rs     내장 계산기의 준비·검증·캐시와 소스 내보내기
   src/routing.rs             연결 지점 배정과 비교용 이전 알고리즘
-crates/factory-core/          클라이언트와 서버가 공유하는 Rust 코드
-  src/graph.rs                기존 FSD / import 스캐너
-  src/repository.rs           재귀 계층, index 그룹, 그룹 경계의 import 관계
-  src/repository_graph.rs     펼침 상태에 따른 그래프와 import 집계
-  src/plan.rs                 계획 JSON 호환, 기본 무결성 검사, Markdown 출력
-crates/factory-server/        기존 Axum 서버 + 읽기 전용 계층 API
+  src/worker.rs              요청을 합쳐 처리하는 백그라운드 계산기
+crates/factory-layout-comparison/  배치 비교, 측정과 JSON/SVG 출력
 scripts/macos/                서버 운영 스크립트와 네이티브 .app 패키징
 ```
+
+`crates/`는 기능별 라이브러리이며, 실행 프로그램의 시작과 조합은 `apps/`가 담당합니다. 각 기능은 자신의 자료형·규칙·입출력 구현을 함께 가집니다. 예를 들어 토큰 저장은 원격 저장소 연결 기능 안에 있습니다. 저장소 관찰은 계획에 의존하지 않고, 계획이 저장소 관찰 결과를 받아 모듈을 가져옵니다. 이 기준은 [crates/AGENTS.md](crates/AGENTS.md)에 기록했습니다.
 
 화면 공용 코드에 Windows/macOS API를 섞지 않고 저장·통신을 분리했습니다. Android 패키징과 작은 화면용 UI는 후속 범위입니다. Android 앱 빌드가 제공되는 것은 아닙니다.
 
@@ -138,10 +150,9 @@ cargo test -p factory-workbench headless_ --locked
 테스트 도구와 글꼴 설정은 개발 의존성이며 배포 앱에는 추가되지 않습니다. 이 테스트는 UI 로직과 파일 작업의 회귀 검사입니다. OS 창 관리, 시스템 파일 선택기, 자격 증명 저장소 및 GPU 픽셀 출력은 별도의 통합 검사 범위입니다. Windows/macOS의 기존 native CI 테스트에도 자동으로 포함됩니다.
 
 ```sh
-cargo test -p factory-core -p factory-server --locked
-cargo test -p factory-layout -p factory-workbench --locked
-cargo clippy -p factory-layout -p factory-workbench --all-targets --locked -- -D warnings
-cargo fmt -p factory-layout -p factory-workbench -- --check
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo fmt --all -- --check
 cargo build -p factory-workbench --release --locked
 
 # 같은 입력으로 ELK / 이전 배치의 계산 시간과 겹침 비교

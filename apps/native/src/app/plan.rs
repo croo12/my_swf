@@ -1,6 +1,6 @@
 use super::fields::{field, list_editor};
 use super::*;
-use factory_core::plan::{Edge, Interface};
+use factory_plan::{Edge, Interface};
 impl Workbench {
     pub(super) fn plan_ui(&mut self, ui: &mut egui::Ui) {
         let selected = self.selected.clone();

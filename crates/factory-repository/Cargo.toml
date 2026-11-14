@@ -1,0 +1,14 @@
+[package]
+name = "factory-repository"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.95"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"

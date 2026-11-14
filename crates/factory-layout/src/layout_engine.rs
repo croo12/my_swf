@@ -1,6 +1,6 @@
 //! ELK adapter. Both shapes and edge sections use root coordinates.
 use emath::{Pos2, Rect, Vec2, pos2};
-use factory_core::repository_graph::{Graph, Node};
+use factory_repository::projection::{Graph, Node};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -196,7 +196,7 @@ mod tests {
     fn rejoins_every_compound_section_in_root_coordinates() {
         let graph = Graph {
             nodes: vec![],
-            edges: vec![factory_core::repository_graph::Edge {
+            edges: vec![factory_repository::projection::Edge {
                 from: "a".into(),
                 to: "b".into(),
                 file_pairs: 1,

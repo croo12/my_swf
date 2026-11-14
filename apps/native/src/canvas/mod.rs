@@ -5,7 +5,8 @@ pub use plan::plan;
 pub use zoom::zoom_at_pointer;
 
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
-use factory_core::{plan::Plan, repository::LAYERS};
+use factory_plan::Plan;
+use factory_repository::LAYERS;
 use std::collections::HashMap;
 
 pub const BACKGROUND: Color32 = Color32::from_rgb(10, 16, 27);

@@ -1,6 +1,6 @@
 use crate::{arrangement::HEADER, focus::relation};
 use emath::{Pos2, Rect, Vec2};
-use factory_core::repository_graph::{Edge, Graph, Node};
+use factory_repository::projection::{Edge, Graph, Node};
 use std::collections::HashMap;
 
 pub struct BoxItem {

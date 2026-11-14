@@ -1,5 +1,6 @@
 use super::*;
-use factory_core::{plan::Node, repository::Entry};
+use factory_plan::Node;
+use factory_repository::Entry;
 impl Workbench {
     pub(super) fn undo(&mut self, redo: bool) {
         self.history_action = true;
@@ -32,7 +33,7 @@ impl Workbench {
     }
 
     pub(super) fn add_entry(&mut self, snapshot: &Snapshot, entry: &Entry) {
-        let node = snapshot.module(entry);
+        let node = Node::from_repository(snapshot, entry);
         let check = Plan {
             nodes: vec![node.clone()],
             ..Default::default()

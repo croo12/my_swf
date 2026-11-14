@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.95"
 
 [dependencies]
-factory-core = { path = "../factory-core" }
+factory-repository = { path = "../factory-repository" }
 emath = "0.37"
 elk-layout = "=0.12.2"
 serde_json = "1"

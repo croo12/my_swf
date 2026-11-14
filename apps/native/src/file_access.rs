@@ -1,5 +1,5 @@
 //! File locations and native dialogs are supplied at the desktop boundary.
-use crate::storage::{self, Session};
+use factory_session::{self as session, Session};
 use std::{path::PathBuf, sync::Arc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,14 +46,14 @@ pub struct FileAccess {
 impl FileAccess {
     pub fn native() -> Self {
         Self {
-            session_path: storage::default_file(),
+            session_path: session::default_file(),
             dialogs: Arc::new(NativeDialogs),
         }
     }
     pub fn load(&self) -> Result<Session, String> {
-        storage::load(self.session_path.as_ref().map_err(Clone::clone)?)
+        session::load(self.session_path.as_ref().map_err(Clone::clone)?)
     }
     pub fn save(&self, session: &Session) -> Result<(), String> {
-        storage::save(self.session_path.as_ref().map_err(Clone::clone)?, session)
+        session::save(self.session_path.as_ref().map_err(Clone::clone)?, session)
     }
 }

@@ -1178,40 +1178,80 @@ dependencies = [
 ]
 
 [[package]]
-name = "factory-core"
-version = "0.2.0"
-dependencies = [
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "uuid",
- "walkdir",
-]
-
-[[package]]
 name = "factory-layout"
 version = "0.2.0"
 dependencies = [
  "elk-layout",
  "emath",
- "factory-core",
+ "factory-repository",
  "serde_json",
  "sha2",
  "tempfile",
 ]
 
 [[package]]
+name = "factory-layout-comparison"
+version = "0.2.0"
+dependencies = [
+ "emath",
+ "factory-layout",
+ "factory-repository",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "factory-plan"
+version = "0.2.0"
+dependencies = [
+ "factory-repository",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
+name = "factory-remote-repository"
+version = "0.2.0"
+dependencies = [
+ "factory-repository",
+ "keyring",
+ "reqwest",
+]
+
+[[package]]
+name = "factory-repository"
+version = "0.2.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "walkdir",
+]
+
+[[package]]
 name = "factory-server"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "axum",
- "factory-core",
+ "factory-remote-repository",
+ "factory-repository",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "factory-session"
+version = "0.2.0"
+dependencies = [
+ "factory-plan",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1221,13 +1261,13 @@ dependencies = [
  "eframe",
  "egui_kittest",
  "egui_system_font_provider",
- "factory-core",
  "factory-layout",
- "keyring",
- "reqwest",
+ "factory-layout-comparison",
+ "factory-plan",
+ "factory-remote-repository",
+ "factory-repository",
+ "factory-session",
  "rfd",
- "serde",
- "serde_json",
  "tempfile",
 ]
 

@@ -1,0 +1,16 @@
+[package]
+name = "factory-server"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+factory-repository = { path = "../../crates/factory-repository" }
+axum = { version = "0.8", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+factory-remote-repository = { path = "../../crates/factory-remote-repository" }
+tempfile = "3"

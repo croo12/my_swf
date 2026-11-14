@@ -3,7 +3,7 @@ use crate::{
     scene::{BoxItem, Route, Scene},
 };
 use emath::{Pos2, Rect, Vec2};
-use factory_core::repository_graph::{Graph, Node};
+use factory_repository::projection::{Graph, Node};
 
 pub(crate) const HEADER: f32 = 58.0;
 const PAD: f32 = 36.0;

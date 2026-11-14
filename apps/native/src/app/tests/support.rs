@@ -1,9 +1,7 @@
 use super::super::*;
-use crate::{
-    file_access::{FileAccess, FileDialogs, Selection},
-    storage,
-};
+use crate::file_access::{FileAccess, FileDialogs, Selection};
 use egui_kittest::{Harness, kittest::Queryable as _};
+use factory_session as session;
 use std::{collections::VecDeque, path::Path, sync::Mutex};
 
 #[derive(Default)]
@@ -40,7 +38,7 @@ pub(super) struct Driver {
 impl Driver {
     pub fn new(plan: Plan) -> Self {
         let root = tempfile::tempdir().unwrap();
-        storage::save(
+        session::save(
             &root.path().join("profile/session.json"),
             &Session {
                 plan,

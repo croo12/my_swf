@@ -3,7 +3,7 @@ use crate::{
     arrangement::FOCUS_GAP,
     focus::{Direction, inside, relation},
 };
-use factory_core::repository_graph::{Edge, Graph, Node};
+use factory_repository::projection::{Edge, Graph, Node};
 fn node(path: &str, kind: &str, children: Vec<Node>) -> Node {
     Node {
         path: path.into(),

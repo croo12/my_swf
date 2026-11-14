@@ -12,13 +12,26 @@ Rust native desktop (Windows / macOS)
        └─ local draft autosave (no credentials)
 
 Repository data sources
-  local folder ─────────── factory-core::repository::analyze
-  HTTPS Factory server ── GET /api/repository/tree ── same core
+  local folder ─────────── factory_repository::analyze
+  HTTPS Factory server ── GET /api/repository/tree ── same repository feature
 ```
 
 ## Ownership
 
-`factory-core` owns the existing FSD scanner, directory hierarchy, plan data and exports. It has no UI, HTTP runtime, WebView or platform credential dependency. `factory-layout` owns scene geometry, selection boundaries, hierarchy arrangement and routing. It uses `emath` for coordinates and has no dependency on eframe or the desktop event loop. `factory-workbench` owns window state, UI modules, painting and the comparison CLI. `factory-server` reuses the core, retaining its previous API for compatibility.
+| Package | Responsibility | Workspace dependencies |
+| --- | --- | --- |
+| `factory-repository` | Observe FSD folders, public index groups and imports; project the visible graph | None |
+| `factory-plan` | Author, validate, import and export implementation plans | `factory-repository` for group import |
+| `factory-session` | Save and restore the workbench session at an explicit profile path | `factory-plan` |
+| `factory-remote-repository` | Connect to a remote repository, authenticate requests and remember its token | `factory-repository` |
+| `factory-layout` | Calculate graph geometry and routes, including background scheduling | `factory-repository` |
+| `factory-layout-comparison` | Compare layout engines and export diagnostic metrics, JSON and SVG | `factory-repository`, `factory-layout` |
+| `factory-workbench` (`apps/native`) | Compose the feature libraries into the desktop UI and CLI | All six feature crates |
+| `factory-server` (`apps/server`) | Serve repository observations and compatibility planning endpoints | `factory-repository`; `factory-remote-repository` in HTTP integration tests only |
+
+Libraries under `crates/` represent individual features. A feature keeps its models, rules, adapters and tests together. For example, credential persistence belongs to remote repository connection. Executable startup and composition live under `apps/`. The dependency direction is explicit: repository observation does not know about authored plans, while `factory_plan::Node::from_repository` consumes observations to seed a plan module. Session persistence consumes the plan format; layout comparison consumes repository and layout features. No umbrella crate aggregates these capabilities.
+
+Feature libraries are independent of eframe and the desktop event loop. The layout library uses `emath` for coordinates. The workbench supplies a wake callback to the layout worker and colors to SVG comparison exports, keeping desktop types outside those APIs. Native file selection remains injected at the app boundary. The boundary rules are recorded in [crates/AGENTS.md](../crates/AGENTS.md).
 
 Every Rust file under `apps/native` is limited to 400 physical lines, counting comments and blank lines. Its Cargo build script checks the complete directory recursively, including build scripts, tests and unreferenced new modules; generated `target` output is excluded. Watching the crate directory also catches newly added files. CI runs the same guard in a separate job before any router setup and repeats it through normal native builds. UI responsibilities are split into `app/`, `canvas/` and `repository_graph/`; reusable behavior belongs in shared crates. The retired Tauri source is available in Git history; app icons live in `apps/native/assets/icons`.
 
@@ -62,11 +75,13 @@ JSON is the full editable record. Markdown includes the summary, modules, respon
 
 Response: `{ repository, sourceRoot, tree, scan, interfaceKinds }`. Each tree entry contains `{ name, path, kind, index, fileCount, children }`. Paths are relative to the FSD source root with `/` separators. `interfaceKinds` uses declaration patterns from the existing scanner; interface behavior and input/output types remain empty for the user to write. The native client supports HTTPS, with loopback HTTP for local use, and does not follow redirects with credentials.
 
-The existing `/api/plan`, `/api/repository/analyze`, `/api/repository/modules`, `/api/plan/check`, `/api/jobs` and approval routes remain available to the old client. Their behavior is documented in [the legacy planning contract](LEGACY-PLANNING.md); the native app does not call AI planning jobs.
+The existing `/api/plan`, `/api/repository/analyze`, `/api/repository/modules`, `/api/plan/check`, `/api/jobs` and approval routes remain available for compatibility. `apps/server/src/api.rs` assembles the HTTP router and serves the current read-only tree API. The older routes, AI runner, proposal model and checks live under `apps/server/src/legacy/`; their behavior is documented in [the legacy planning contract](LEGACY-PLANNING.md). The native app does not call AI planning jobs.
 
 ## Runtime and platform scope
 
 The native UI has headless regression tests under `apps/native/src/app/tests`, using `egui_kittest` 0.37 with its eframe integration. The harness constructs the real `Workbench`, drives its accessible widgets and inspects plan state and scene geometry without creating an OS window or capturing the desktop. It retains accessibility-name and missing-glyph checks and installs the same system-font fallback used by native eframe. No snapshot renderer or GPU is required for these interaction tests.
+
+Feature tests additionally cover importing a real repository group into a plan, authenticated requests from `factory-remote-repository` to the real server router, credential-safe URL and redirect handling, worker request coalescing and recovery after a calculation panic, and standalone layout comparison JSON/SVG exports. These checks run without a desktop session or external AI service.
 
 `FileAccess` injects the session path and a `FileDialogs` implementation. Production uses the original OS locations and rfd dialogs; each test supplies an isolated temporary profile and scripted selections. Tests do not change process environment variables. Repository tests scan a small on-disk FSD fixture and exercise the actual background layout worker and embedded router. Readiness checks account for pending requests, expansion revisions and selection changes; they wait with a deadline rather than relying on a fixed number of frames for asynchronous completion. App editing and autosave timing remain unchanged. These tests do not claim OS-window, system-dialog, keychain or GPU-renderer coverage.
 

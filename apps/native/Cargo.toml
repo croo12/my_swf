@@ -5,18 +5,16 @@ edition = "2024"
 rust-version = "1.95"
 
 [dependencies]
-factory-core = { path = "../../crates/factory-core" }
+factory-plan = { path = "../../crates/factory-plan" }
+factory-repository = { path = "../../crates/factory-repository" }
+factory-session = { path = "../../crates/factory-session" }
+factory-remote-repository = { path = "../../crates/factory-remote-repository" }
+factory-layout-comparison = { path = "../../crates/factory-layout-comparison" }
 factory-layout = { path = "../../crates/factory-layout" }
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard", "system_fonts", "accesskit", "x11", "wayland"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 rfd = "0.17"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
 [dev-dependencies]
 egui_kittest = { version = "=0.37.0", default-features = false, features = ["eframe"] }
 egui_system_font_provider = "=0.37.0"
 tempfile = "3"
-
-[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
-keyring = { version = "3", features = ["windows-native", "apple-native"] }

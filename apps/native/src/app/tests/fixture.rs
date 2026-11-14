@@ -1,4 +1,4 @@
-use factory_core::plan::{Node, Plan};
+use factory_plan::{Node, Plan};
 use std::{
     fs,
     path::{Path, PathBuf},

@@ -1,20 +1,15 @@
 mod cards;
-mod comparison;
 mod paint;
 mod status;
 mod viewport;
 mod worker;
 
-pub use comparison::run as compare;
-use worker::Worker;
+use factory_layout::worker::Worker;
 
 use crate::canvas::{self, ACCENT, BACKGROUND, BORDER, CARD, MUTED, TEXT};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
-use factory_core::{
-    repository::{Entry, Snapshot},
-    repository_graph,
-};
 use factory_layout::{Direction, Scene, inside, is_layer, relation};
+use factory_repository::{Entry, Snapshot, projection as repository_graph};
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 pub struct View {

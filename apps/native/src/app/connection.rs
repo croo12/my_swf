@@ -1,6 +1,6 @@
 use super::fields::field;
 use super::*;
-use crate::transport;
+use factory_remote_repository::credentials;
 impl Workbench {
     pub(super) fn connection(&mut self, ctx: &egui::Context) {
         if !self.connection_open {
@@ -27,7 +27,7 @@ impl Workbench {
                     "연결 성공 후 OS 자격 증명 저장소에 토큰 기억",
                 );
                 if ui.button("기존 앱에서 저장한 토큰 읽기").clicked() {
-                    match transport::token(true, "") {
+                    match credentials::load_token() {
                         Ok(token) => self.token = token,
                         Err(error) => self.notify(error, true),
                     }

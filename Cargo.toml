@@ -1,3 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/factory-core", "crates/factory-layout", "crates/factory-server", "apps/native"]
+members = [
+    "crates/factory-repository",
+    "crates/factory-plan",
+    "crates/factory-session",
+    "crates/factory-remote-repository",
+    "crates/factory-layout",
+    "crates/factory-layout-comparison",
+    "apps/server",
+    "apps/native",
+]

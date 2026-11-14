@@ -33,7 +33,7 @@ fn headless_existing_plan_cards_can_be_selected_and_edited() {
 #[test]
 fn headless_interfaces_and_dependencies_can_be_added_changed_and_removed() {
     let mut plan = fixture::plan();
-    plan.nodes.push(factory_core::plan::Node {
+    plan.nodes.push(factory_plan::Node {
         id: "checkout".into(),
         name: "Checkout".into(),
         path: "features/checkout/model".into(),

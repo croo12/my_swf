@@ -6,6 +6,7 @@ mod focus;
 pub mod layout_engine;
 mod routing;
 mod scene;
+pub mod worker;
 
 pub use elk_routing::check_runtime;
 pub use embedded_router::export_sources;
