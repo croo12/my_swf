@@ -147,7 +147,8 @@ impl Workbench {
                         egui::TextEdit::singleline(&mut self.search)
                             .hint_text("이름·경로 검색")
                             .desired_width(200.0),
-                    );
+                    )
+                    .accessible_name("저장소 검색");
                 });
                 if !self.search.is_empty() {
                     egui::CollapsingHeader::new(

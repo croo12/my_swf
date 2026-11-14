@@ -56,6 +56,22 @@ impl Default for View {
 }
 
 impl View {
+    #[cfg(test)]
+    pub(crate) fn test_scene(&self, selected: &str) -> Result<Option<&Scene>, &str> {
+        if let Some(error) = &self.error {
+            return Err(error);
+        }
+        Ok(
+            if self.pending
+                || self.built_revision != self.revision
+                || self.routed_selection != selected
+            {
+                None
+            } else {
+                self.scene.as_ref()
+            },
+        )
+    }
     pub fn reset(&mut self) {
         *self = Self::default();
     }

@@ -91,7 +91,9 @@ impl Workbench {
                                                             kind,
                                                         );
                                                     }
-                                                });
+                                                })
+                                                .response
+                                                .accessible_name("인터페이스 종류");
                                             field(ui, "조건 · 언제", &mut item.condition, true);
                                             field(
                                                 ui,
@@ -146,7 +148,9 @@ impl Workbench {
                                                 name,
                                             );
                                         }
-                                    });
+                                    })
+                                    .response
+                                    .accessible_name("의존 대상");
                                 let valid_target =
                                     targets.iter().any(|(target, _)| target == &self.connect_to);
                                 if ui
@@ -207,7 +211,9 @@ impl Workbench {
                                                         kind,
                                                     );
                                                 }
-                                            });
+                                            })
+                                            .response
+                                            .accessible_name("관계 종류");
                                         list_editor(
                                             ui,
                                             "사용하는 인터페이스 · 한 줄에 하나",

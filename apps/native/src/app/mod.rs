@@ -5,11 +5,14 @@ mod header;
 mod history;
 mod plan;
 mod repository;
+#[cfg(test)]
+mod tests;
 
 use crate::{
     canvas::{self, ACCENT, BACKGROUND, BORDER, MUTED, PANEL, TEXT},
+    file_access::FileAccess,
     repository_graph,
-    storage::{self, Session},
+    storage::Session,
 };
 use eframe::egui::{self, Color32, RichText};
 use factory_core::{plan::Plan, repository::Snapshot};
@@ -26,6 +29,7 @@ enum Event {
 }
 
 pub struct Workbench {
+    files: FileAccess,
     session: Session,
     repository: Option<Arc<Snapshot>>,
     repository_graph: repository_graph::View,
@@ -54,6 +58,14 @@ pub struct Workbench {
 
 impl Workbench {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>) -> Self {
+        Self::with_file_access(cc, initial, FileAccess::native())
+    }
+
+    fn with_file_access(
+        cc: &eframe::CreationContext<'_>,
+        initial: Option<PathBuf>,
+        files: FileAccess,
+    ) -> Self {
         let mut style = (*cc.egui_ctx.style_of(egui::Theme::Dark)).clone();
         style.visuals = egui::Visuals::dark();
         style.visuals.panel_fill = PANEL;
@@ -85,7 +97,7 @@ impl Workbench {
                 ..Default::default()
             };
         });
-        let (session, message, storage_enabled) = match storage::load() {
+        let (session, message, storage_enabled) = match files.load() {
             Ok(session) => (
                 session,
                 "저장소를 열어 구조를 살펴보거나 직접 계획을 작성하세요.".into(),
@@ -95,6 +107,7 @@ impl Workbench {
         };
         let (sender, receiver) = mpsc::channel();
         let mut app = Self {
+            files,
             session,
             repository: None,
             repository_graph: repository_graph::View::default(),
@@ -136,7 +149,7 @@ impl Workbench {
 
     fn persist(&mut self) {
         if self.storage_enabled && self.dirty {
-            match storage::save(&self.session) {
+            match self.files.save(&self.session) {
                 Ok(()) => self.dirty = false,
                 Err(error) => {
                     self.storage_enabled = false;

@@ -50,7 +50,8 @@ jobs:
           bash scripts/native/prepare-router.sh
       - run: cargo fmt -p factory-workbench -p factory-layout -- --check
       - run: cargo clippy -p factory-workbench -p factory-layout --all-targets --locked -- -D warnings
-      - run: cargo test -p factory-core -p factory-layout -p factory-workbench --locked
+      - name: Run core, layout and headless UI regressions
+        run: cargo test -p factory-core -p factory-layout -p factory-workbench --locked
       - run: cargo build -p factory-workbench --release --locked
       - name: Check standalone Windows executable
         if: runner.os == 'Windows'

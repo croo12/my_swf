@@ -15,12 +15,13 @@ impl Workbench {
             .show(ctx, |ui| {
                 ui.label("현재 서버 체크아웃의 폴더와 import를 읽습니다.");
                 field(ui, "서버 주소 · HTTPS", &mut self.session.server, false);
-                ui.label(RichText::new("Factory API 토큰").small().color(MUTED));
+                let token_label = ui.label(RichText::new("Factory API 토큰").small().color(MUTED));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.token)
                         .password(true)
                         .desired_width(f32::INFINITY),
-                );
+                )
+                .labelled_by(token_label.id);
                 ui.checkbox(
                     &mut self.remember_token,
                     "연결 성공 후 OS 자격 증명 저장소에 토큰 기억",

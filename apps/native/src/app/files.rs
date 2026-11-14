@@ -1,4 +1,5 @@
 use super::*;
+use crate::file_access::Selection;
 use crate::transport;
 use factory_core::repository;
 impl Workbench {
@@ -9,12 +10,9 @@ impl Workbench {
         self.busy = true;
         self.notify("저장소의 디렉터리와 import를 읽는 중…", false);
         let sender = self.sender.clone();
+        let dialogs = self.files.dialogs.clone();
         std::thread::spawn(move || {
-            let path = path.or_else(|| {
-                rfd::FileDialog::new()
-                    .set_title("FSD 저장소 열기")
-                    .pick_folder()
-            });
+            let path = path.or_else(|| dialogs.select(Selection::Repository));
             if let Some(path) = path {
                 let result = repository::analyze(&path);
                 let _ = sender.send(Event::Repository(result, false));
@@ -55,10 +53,10 @@ impl Workbench {
         }
         self.busy = true;
         let sender = self.sender.clone();
+        let dialogs = self.files.dialogs.clone();
         std::thread::spawn(move || {
-            let result = rfd::FileDialog::new()
-                .add_filter("계획 JSON", &["json"])
-                .pick_file()
+            let result = dialogs
+                .select(Selection::Import)
                 .map(|file| {
                     std::fs::read_to_string(file)
                         .map_err(|e| e.to_string())
@@ -89,16 +87,15 @@ impl Workbench {
         };
         self.busy = true;
         let sender = self.sender.clone();
+        let dialogs = self.files.dialogs.clone();
         std::thread::spawn(move || {
-            let (extension, name) = if markdown {
-                ("md", "implementation-plan.md")
+            let selection = if markdown {
+                Selection::Markdown
             } else {
-                ("json", "plan.json")
+                Selection::Json
             };
-            let result = rfd::FileDialog::new()
-                .set_file_name(name)
-                .add_filter("계획", &[extension])
-                .save_file()
+            let result = dialogs
+                .select(selection)
                 .map(|file| {
                     std::fs::write(&file, text)
                         .map(|_| file)

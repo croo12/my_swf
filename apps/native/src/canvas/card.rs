@@ -17,6 +17,13 @@ pub fn card(
     scale: f32,
 ) -> egui::Response {
     let response = ui.interact(rect, id, Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Button,
+            ui.is_enabled(),
+            format!("{} 선택", card.path),
+        )
+    });
     if !ui.is_rect_visible(rect) {
         return response;
     }

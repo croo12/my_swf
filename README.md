@@ -87,8 +87,10 @@ apps/native/                  Rust 네이티브 클라이언트
   build.rs                   Rust 파일별 400줄 제한 검사
   assets/icons/              Windows / macOS 공용 앱 아이콘
   src/app/                   앱 상태, 계획 편집, 저장소 탐색, 파일·연결 작업
+  src/app/tests/             창 없이 실제 앱을 조작하는 egui_kittest 회귀 테스트
   src/canvas/                카드, 계획 그래프, 커서 기준 확대·축소
   src/repository_graph/      중첩 그래프 UI, 비동기 작업, 그리기와 비교 CLI
+  src/file_access.rs         파일 선택기와 자동 저장 경로의 주입 경계
   src/storage.rs              로컬 초안 자동 저장
   src/transport.rs            선택적인 원격 구조 조회 / OS 토큰 저장
 crates/factory-layout/        UI와 독립적인 그래프 배치·연결선 계산
@@ -121,6 +123,19 @@ git config --local core.hooksPath .githooks
 Windows Git Bash와 macOS에서 동작하며 Rust 개발 환경의 `rustc`만 사용합니다. Cargo 빌드나 외부 패키지 설치는 하지 않습니다. 훅은 Git 인덱스에 들어 있는 모든 네이티브 Rust 파일을 검사하므로, 부분 스테이징·이름 변경·삭제도 실제 커밋 내용에 맞게 처리합니다. 작업 폴더에서 파일을 줄였더라도 스테이징된 버전이 401줄이면 커밋이 실패합니다. 새 클론에는 위 설정을 다시 적용해야 합니다.
 
 ## 확인
+
+Computer Use나 데스크톱 창 없이 실제 `Workbench`의 UI 코드를 테스트할 수 있습니다.
+
+```sh
+# 헤드리스 UI 회귀 테스트만 실행
+cargo test -p factory-workbench headless_ --locked
+```
+
+`egui_kittest`로 이름이 붙은 위젯에 클릭·키보드·Ctrl+휠 이벤트를 전달하고 앱 상태와 실제 연결선 좌표를 검사합니다. 테스트 저장소, 계획 파일, 자동 저장 경로는 테스트마다 임시 폴더에 만들고 파일 선택기는 미리 지정한 응답으로 대체합니다. 기존 사용자 초안이나 OS 파일 대화상자에 접근하지 않습니다. 저장소 스캐너, 비동기 작업자와 내장 라우터는 실제 구현을 사용하며, 최신 계산이 완료됐는지 확인한 뒤 결과를 검사합니다.
+
+레이어 펼침·접기, 한 줄 배치·선택 연결·흐림 처리, 검색·index 진입점·그룹 복사, Ctrl+휠의 그래프 범위, 계획 편집·되돌리기·다시 실행, 인터페이스·관계 편집, JSON/Markdown 내보내기, JSON 가져오기·거절·취소, 자동 저장·앱 재생성과 손상된 초안 보존을 검사합니다. 접근성 이름과 글꼴 누락 검사도 활성화되어 있습니다. 한글 표시는 실제 네이티브 앱과 같은 시스템 글꼴 대체를 사용합니다.
+
+테스트 도구와 글꼴 설정은 개발 의존성이며 배포 앱에는 추가되지 않습니다. 이 테스트는 UI 로직과 파일 작업의 회귀 검사입니다. OS 창 관리, 시스템 파일 선택기, 자격 증명 저장소 및 GPU 픽셀 출력은 별도의 통합 검사 범위입니다. Windows/macOS의 기존 native CI 테스트에도 자동으로 포함됩니다.
 
 ```sh
 cargo test -p factory-core -p factory-server --locked
