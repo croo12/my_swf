@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 version="${1:-0.2.0}"
-app="target/native-bundle/Planning Workbench.app"
+app="target/native-single-bundle/Planning Workbench.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 lipo -create target/aarch64-apple-darwin/release/factory-workbench \
   target/x86_64-apple-darwin/release/factory-workbench -output "$app/Contents/MacOS/factory-workbench"

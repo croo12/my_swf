@@ -45,7 +45,33 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: Prepare Windows router
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/native/prepare-router.ps1
+      - name: Prepare macOS router
+        if: runner.os == 'macOS'
+        run: |
+          brew install automake libtool pkg-config
+          bash scripts/native/prepare-router.sh
       - run: cargo fmt -p factory-workbench -- --check
       - run: cargo clippy -p factory-workbench --locked -- -D warnings
       - run: cargo test -p factory-core -p factory-workbench --locked
       - run: cargo build -p factory-workbench --release --locked
+      - name: Check standalone Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $directory = Join-Path (Get-Location).Path 'target/standalone-check'
+          New-Item -ItemType Directory -Path $directory -Force | Out-Null
+          Copy-Item -LiteralPath target/release/factory-workbench.exe -Destination $directory
+          $check = Start-Process -FilePath "$directory/factory-workbench.exe" -ArgumentList '--check-router' -WorkingDirectory $directory -WindowStyle Hidden -Wait -PassThru
+          if ($check.ExitCode -ne 0) { throw "Embedded router check failed: $($check.ExitCode)" }
+          if ((Get-ChildItem -LiteralPath $directory).Count -ne 1) { throw 'The executable created sidecar files' }
+      - name: Check standalone macOS executable
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p target/standalone-check
+          cp target/release/factory-workbench target/standalone-check/
+          (cd target/standalone-check && ./factory-workbench --check-router)
+          test "$(find target/standalone-check -type f | wc -l | tr -d ' ')" = 1

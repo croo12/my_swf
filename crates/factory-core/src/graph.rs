@@ -395,12 +395,16 @@ pub fn scan(repo: &Path) -> Result<Value, String> {
     let mut internal: BTreeMap<String, BTreeSet<(String, String, String)>> = BTreeMap::new();
     let mut unresolved = 0usize;
     let mut unresolved_samples: Vec<Value> = vec![];
+    // The repository browser needs the actual module boundary, including index re-exports.
+    // Keep these direct file references separate from the plan scanner's resolved providers.
+    let mut file_references = BTreeSet::new();
     let walker = WalkDir::new(&root).follow_links(false).max_depth(24).into_iter()
         .filter_entry(|e| e.depth() == 0 || !(e.file_type().is_dir() && is_ignored_dir(&e.file_name().to_string_lossy())));
     for entry in walker.filter_map(Result::ok) {
         let file = entry.path();
         if !entry.file_type().is_file() || !is_source_file(file) || is_test_file(file) { continue; }
-        let Location::Node(source) = scan.locate(file) else { continue; };
+        let source = scan.locate(file);
+        if !LAYERS.contains(&relative(&root, file).split('/').next().unwrap_or("")) { continue; }
         let Ok(text) = fs::read_to_string(file) else { continue; };
 
         let mut imports: Vec<(String, Names)> = vec![];
@@ -417,6 +421,13 @@ pub fn scan(repo: &Path) -> Result<Value, String> {
 
         for (spec, names) in imports {
             let Some(target_path) = scan.resolve_spec(file, &spec) else { continue; };
+            if let Some(provider) = resolve_module(&target_path) {
+                let imported = match &names { Names::All => vec![ALL_NAMES.to_owned()], Names::List(list) => list.clone() };
+                for name in imported {
+                    file_references.insert((relative(&root, file), relative(&root, &provider), name));
+                }
+            }
+            let Location::Node(source) = &source else { continue; };
             // Each target comes with what is imported from it: (name, file that provides the name).
             let targets: Vec<(String, Vec<(String, String)>)> = match scan.locate(&target_path) {
                 Location::Node(path) => {
@@ -451,7 +462,7 @@ pub fn scan(repo: &Path) -> Result<Value, String> {
             let importing_file = relative(&root, file);
             for (target, imported) in targets {
                 let facts = imported.into_iter().map(|(name, provider)| (importing_file.clone(), name, provider));
-                if target == source { internal.entry(target).or_default().extend(facts); continue; }
+                if target == *source { internal.entry(target).or_default().extend(facts); continue; }
                 let key = (source.clone(), target);
                 if !edge_facts.contains_key(&key) { edge_order.push(key.clone()); }
                 edge_facts.entry(key).or_default().extend(facts);
@@ -469,7 +480,8 @@ pub fn scan(repo: &Path) -> Result<Value, String> {
         .map(|(from, to, fact)| record(from, to, fact)).collect();
 
     let source_root = root.strip_prefix(repo).unwrap_or(&root).to_string_lossy().replace('\\', "/");
-    Ok(json!({"schemaVersion":"0.3","version":1,"nodes":nodes,"edges":edges,"records":records,"requests":[],"repository":repo.display().to_string(),
+    let file_references: Vec<Value> = file_references.into_iter().map(|(file, provider, name)| json!({"file":file,"provider":provider,"name":name})).collect();
+    Ok(json!({"schemaVersion":"0.3","version":1,"nodes":nodes,"edges":edges,"records":records,"fileReferences":file_references,"requests":[],"repository":repo.display().to_string(),
         "analysis":{"kind":"static","sourceRoot":source_root,"slices":scan.slices.len(),"unresolvedImports":unresolved,"unresolvedSamples":unresolved_samples,
             "note":"Directories and resolvable imports are verified. A slice is the first folder below a layer that has an index file; imports of a slice's public API are traced through its re-exports. No AI-derived I/O contracts."}}))
 }

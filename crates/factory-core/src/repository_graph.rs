@@ -80,7 +80,7 @@ pub fn project(snapshot: &Snapshot, expanded: &BTreeSet<String>) -> Graph {
         names: BTreeSet<String>,
     }
     let mut connections: BTreeMap<(String, String), Facts> = BTreeMap::new();
-    for record in snapshot.scan["records"].as_array().into_iter().flatten() {
+    for record in snapshot.references() {
         let (Some(file), Some(provider)) = (record["file"].as_str(), record["provider"].as_str())
         else {
             continue;
@@ -213,19 +213,24 @@ mod tests {
         let group = &graph.nodes[0].children[0].children[0].children[0];
         assert_eq!(group.path, "features/cart/model/actions");
         assert_eq!(group.children.len(), 2);
-        assert!(graph
-            .edges
-            .iter()
-            .any(|edge| edge.from == "features/checkout"
-                && edge.to == "features/cart/model/actions/add.ts"));
-        assert!(graph
-            .edges
-            .iter()
-            .any(|edge| edge.from == "features/cart/model/actions/add.ts" && edge.to == "shared"));
-        assert!(graph
-            .edges
-            .iter()
-            .any(|edge| edge.from.ends_with("index.ts") && edge.to.ends_with("add.ts")));
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|edge| edge.from == "features/checkout"
+                    && edge.to == "features/cart/model/actions/add.ts")
+        );
+        assert!(
+            graph.edges.iter().any(
+                |edge| edge.from == "features/cart/model/actions/add.ts" && edge.to == "shared"
+            )
+        );
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|edge| edge.from.ends_with("index.ts") && edge.to.ends_with("add.ts"))
+        );
     }
     #[test]
     fn collapsing_a_group_retargets_external_edges_and_hides_only_internal_edges() {
@@ -242,10 +247,12 @@ mod tests {
         assert!(graph.edges.iter().any(
             |edge| edge.from == "features/checkout" && edge.to == "features/cart/model/actions"
         ));
-        assert!(graph
-            .edges
-            .iter()
-            .any(|edge| edge.from == "features/cart/model/actions" && edge.to == "shared"));
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|edge| edge.from == "features/cart/model/actions" && edge.to == "shared")
+        );
         assert!(graph.edges.iter().all(|edge| edge.from != edge.to));
     }
 }

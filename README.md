@@ -9,6 +9,19 @@
 
 Rust 1.95 이상이 필요합니다. Windows에는 MSVC C++ Build Tools, macOS에는 Xcode Command Line Tools가 필요합니다.
 
+개발 빌드에서 먼저 앱에 내장할 연결선 라우터를 준비합니다. Windows는 고정된 SHA256으로 검증한 upstream 실행 파일을 받고, macOS는 같은 소스에서 서명된 universal 실행 파일을 빌드합니다. `build.rs`가 계산기·라이선스·원본 소스를 앱 실행 파일에 포함합니다.
+
+```powershell
+# Windows, 저장소 루트에서 한 번 실행
+./scripts/native/prepare-router.ps1
+```
+
+```sh
+# macOS
+brew install automake libtool pkg-config
+bash scripts/native/prepare-router.sh
+```
+
 ```sh
 # 프로젝트 루트에서 실행
 cargo run -p factory-workbench --release
@@ -22,15 +35,23 @@ cargo build -p factory-workbench --release --locked
 
 Windows 실행 파일은 `target/release/factory-workbench.exe`, macOS 실행 파일은 `target/release/factory-workbench`입니다. 앱을 실행한 뒤 **폴더 열기**로 로컬 저장소를 선택할 수도 있습니다. 로컬 분석에는 서버나 AI 계정이 필요하지 않습니다.
 
-Windows에서 빌드·실행을 확인합니다. macOS는 동일 소스와 CI 빌드 경로를 제공하며, 이 Windows 작업 환경에서는 macOS 실행을 검증하지 않습니다. 릴리스 태그 빌드는 Windows ZIP과 macOS universal `.app` ZIP을 생성합니다. 배포용 코드 서명·공증은 별도입니다.
+Windows 배포는 **`factory-workbench.exe` 하나**를 받아 실행합니다. macOS는 **`.app` 하나**를 사용합니다. 연결선 계산기는 앱에 내장되어 있고, 첫 계산 시 사용자 캐시에 자동으로 준비해 재사용합니다. 실행 파일 옆에 보조 파일을 두거나 인터넷에서 추가 다운로드할 필요가 없습니다. 사용자 캐시는 Windows `%LOCALAPPDATA%/SoftwareFactoryNative/router/`, macOS `~/Library/Caches/SoftwareFactoryNative/router/` 아래입니다.
+
+라이선스·저작권 고지와 대응하는 원본 소스도 실행 파일에 내장되어 있습니다. `factory-workbench --export-router-sources <폴더>`로 내보낼 수 있으며, 개발용 `--check-router`는 창을 열지 않고 내장 계산기를 검증합니다. 독립적으로 수정한 계산기는 `FACTORY_LIBAVOID_SERVER`로 지정할 수 있습니다. [라우터 고지](docs/ROUTER-NOTICES.txt).
+
+Windows에서 빌드·실행을 확인합니다. macOS는 동일 소스와 CI 빌드 경로를 제공하며, 이 Windows 작업 환경에서는 macOS 실행을 검증하지 않습니다. 릴리스 태그 빌드는 Windows 단일 `.exe`와 macOS universal `.app` ZIP을 생성합니다. 배포용 코드 서명·공증은 별도입니다.
 
 ## 저장소 구조 보기
 
 1. FSD 저장소를 엽니다. 모노레포 안에서도 소스 루트를 찾습니다. 직접 지정하려면 `FACTORY_SOURCE_ROOT`를 저장소 기준 상대 경로로 설정합니다.
 2. **의존 관계 그래프 안에서 Layer → Slice → 내부 폴더 / index 그룹 → 하위 그룹·파일** 순서로 노드를 펼칩니다. 펼친 부모 박스 안에 자식 노드가 나타나며 다른 레이어·형제 노드와 연결선도 같은 캔버스에 유지됩니다. `app`과 `shared`는 FSD 특성상 slice 없이 내부 그룹을 펼칩니다.
-3. 펼친 그룹의 제목을 누르면 접힙니다. 접힌 그룹의 외부 import는 그룹 경계에 모이고, 펼치면 실제 내부 노드로 연결됩니다. **Layer 보기 / Slice 보기**, 확대 도구, 스크롤로 탐색합니다. 검색 결과나 의존 대상 파일을 선택하면 필요한 상위 그룹을 펼쳐 그래프에서 해당 위치를 보여줍니다. Shift+클릭은 펼침 상태를 바꾸지 않고 관계만 선택합니다.
-4. `index` 배지는 `index.ts`, `index.tsx`, `index.js` 등의 공개 진입점이 있는 디렉터리를 뜻합니다. 일반 폴더도 실제 계층을 유지하며 표시합니다.
+3. **카드 클릭은 연결 선택**, 왼쪽 **▸ / ▾ 버튼은 펼치기 / 접기**입니다. 레이어 제목 클릭은 펼치기 / 접기만 수행합니다. 접힌 그룹의 외부 import는 그룹 경계에 모이고, 펼치면 실제 내부 노드로 연결됩니다. **Layer 보기 / Slice 보기**, 확대 도구, 스크롤과 **마우스 드래그로 가로·세로 이동**하며 탐색합니다. 그래프 위에서 **Ctrl+휠**로 커서 위치를 기준으로 확대·축소합니다(macOS는 Cmd+휠도 지원). 일반 휠은 스크롤에 사용하며, 오른쪽 상세 패널에서는 그래프 배율을 바꾸지 않습니다. 검색 결과나 의존 대상 파일을 선택하면 필요한 상위 그룹을 펼쳐 그래프에서 해당 위치를 보여줍니다.
+4. `index` 배지는 `index.ts`, `index.tsx`, `index.js` 등의 공개 진입점이 있는 디렉터리를 뜻합니다. 일반 폴더도 실제 계층을 유지하며 표시합니다. 오른쪽 **공개 진입점** 링크를 누르면 해당 index 파일로 이동합니다. 파일 카드는 실제 import·재노출 연결을 보여주므로 index에서 내보내는 파일과 index를 사용하는 곳도 탐색할 수 있습니다.
 5. 연결선에 마우스를 올리면 import 이름과 파일 관계 수를 확인합니다. 오른쪽에서는 선택한 그룹의 파일 목록과 경계를 넘는 실제 import 관계를 봅니다. **이 그룹을 계획에 추가**로 세그먼트·그룹·파일을 계획에 복사합니다.
+
+저장소 그래프는 FSD 레이어가 위에서 아래로 쌓이는 **층별 배치**입니다. 각 레이어의 카드는 **줄바꿈 없이 한 줄**로 놓으며, 중첩 그룹 내부도 같은 수평 배치를 사용합니다. 카드를 선택하면 선택 카드와 직접 연결된 카드를 앞에 모으고, 무관한 카드는 **오른쪽으로 이동해 흐리게 표시**합니다. 상위 그룹과 펼침 상태는 유지합니다. 선택이 없으면 연결선을 숨기고, 선택 시 그 카드가 사용하는 곳과 사용되는 곳의 연결만 표시합니다. 펼친 그룹을 선택하면 그룹 경계를 넘는 연결만 표시하며, 내부 관계는 해당 하위 카드를 선택해 확인합니다. 빈 공간이나 **선택 해제**를 누르면 원래 순서와 밝기로 돌아갑니다. 레이어 자체는 연결 선택 대상이 아닙니다.
+
+선택한 연결만 백그라운드에서 **ELK의 고정 노드용 Libavoid 라우터**로 계산합니다. 카드의 한 줄 배치와 중첩 구조는 앱이 정하고, 라우터는 카드 본문과 그룹 제목을 우회하는 직각 연결선만 정합니다. 선택 시 정렬·흐림 처리, 드래그 탐색과 레이어 선택 규칙도 유지합니다. 보라색은 사용하는 곳, 청록색은 이 카드를 사용하는 곳입니다. 선택 연결 수와 전체 연결 수를 함께 표시하며, 선택은 저장소나 계획 데이터를 변경하지 않습니다. **화면 맞춤**은 그래프 너비를 맞춥니다. ELK Layered가 카드까지 배치하는 방식은 아래 비교 CLI에서 시험할 수 있습니다. 어느 방식도 별도 Node·JVM 프로세스를 사용하지 않습니다.
 
 구조 탐색은 저장소를 읽기만 합니다. `git pull`이나 소스 변경은 수행하지 않습니다. 분석은 기존 정적 스캐너를 공유하며 TypeScript AST 분석은 아닙니다. 상대 import, `@/`, FSD 레이어 별칭과 index 재노출을 추적하지만 모든 tsconfig 별칭이나 런타임 의존성을 해석하지는 않습니다. 확인하지 못한 import 수를 하단에 표시합니다. 타입과 동작은 사람이 직접 작성합니다.
 
@@ -66,7 +87,11 @@ apps/native/                  Rust 네이티브 클라이언트
   src/app.rs                  화면 구성, 탐색, 수동 편집, 파일 작업
   src/canvas.rs               기존 스타일의 카드와 레이어별 계획 그래프
   src/repository_graph.rs     그룹 안에서 펼치고 접는 중첩 저장소 그래프
-  src/routing.rs              노드와 그룹 제목을 우회하는 직교 연결선
+  src/layout_engine.rs        ELK 중첩 배치 / 직각 경로 어댑터
+  src/elk_routing.rs          고정 카드 구조의 ELK Libavoid 네이티브 연결선
+  src/embedded_router.rs     내장 계산기의 자동 준비·검증·캐시와 소스 내보내기
+  src/layout_comparison.rs    같은 저장소로 두 배치의 JSON / SVG / 지표 생성
+  src/routing.rs              연결 지점 배정과 비교용 이전 연결선 알고리즘
   src/storage.rs              로컬 초안 자동 저장
   src/transport.rs            선택적인 원격 구조 조회 / OS 토큰 저장
 crates/factory-core/          클라이언트와 서버가 공유하는 Rust 코드
@@ -85,9 +110,15 @@ scripts/macos/                서버 운영 스크립트와 네이티브 .app �
 
 ```sh
 cargo test -p factory-core -p factory-server --locked
+cargo test -p factory-workbench --locked
 cargo clippy -p factory-workbench --locked -- -D warnings
 cargo fmt -p factory-workbench -- --check
 cargo build -p factory-workbench --release --locked
+
+# 같은 입력으로 ELK / 이전 배치의 계산 시간과 겹침 비교
+cargo run -p factory-workbench --release --locked -- --compare-layout /path/to/repository target/elk-comparison
 ```
+
+비교 결과는 `report.json`, 시나리오별 `*-input.json`, `*-elk.json`, `*-elk.svg`, `*-previous.svg`로 저장됩니다. Layer / Slice 전체 화면을 비교하고, `features/variants-filter`가 있으면 실제 중첩 API·index 그룹도 비교합니다. 지표는 단일 로컬 실행의 측정값이며 `milliseconds`에는 소스 분석 시간이 포함되지 않습니다.
 
 [현재 구조와 데이터 흐름](docs/ARCHITECTURE.md), [이전 Tauri 실행 안내](docs/LEGACY-TAURI.md), [이전 AI 계획 생성 계약](docs/LEGACY-PLANNING.md).

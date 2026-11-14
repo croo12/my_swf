@@ -1,0 +1,34 @@
+Planning Workbench - native ELK Libavoid router
+
+This distribution includes the native libavoid-server backend used by Eclipse
+Layout Kernel's optional org.eclipse.elk.alg.libavoid integration. The application
+calls its standard input/output protocol directly because the elk-rs 0.12.2
+Libavoid provider does not implement routing. This is not ELK Layered layout.
+
+libavoid-server v0.3.1
+Copyright (c) 2013, 2022 Kiel University and others.
+License: Eclipse Public License 2.0 (embedded LICENSE-libavoid-server.txt)
+Source: https://github.com/TypeFox/libavoid-server/tree/v0.3.1
+
+libavoid / Adaptagrams
+Copyright (c) Monash University, Michael Wybrow and contributors.
+License: GNU Lesser General Public License 2.1 (embedded LICENSE-libavoid.txt)
+Source revision: fcac991f9f7d959e8326ae0567ce122839fbd4be
+https://github.com/mjwybrow/adaptagrams/tree/fcac991f9f7d959e8326ae0567ce122839fbd4be
+
+The router payload, license texts, complete corresponding upstream source archives
+and preparation scripts are embedded in the application executable. They are also
+prepared automatically in its private runtime cache. To obtain independent copies,
+run `factory-workbench --export-router-sources <directory>`; the archives and build
+scripts are exported under SOURCES/. No network connection is needed to export.
+The Windows router payload is the unmodified upstream v0.3.1 release.
+To rebuild it, extract both archives, follow the build workflow and Makefile
+in libavoid-server/.github/workflows/build.yml, and use the supplied Adaptagrams
+revision (configure --disable-shared; make in cola/libavoid). macOS preparation
+compiles a universal backend from these archives with prepare-router.sh.
+An independently rebuilt router can be selected with FACTORY_LIBAVOID_SERVER;
+it does not require relinking or replacing Planning Workbench.
+
+The router is started locally for a selected graph and exits after returning
+its routes. It receives numeric geometry only; it does not contact a server.
+No Node.js, browser, Java, or JVM runtime is used by this native backend.

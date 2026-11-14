@@ -71,10 +71,19 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// Direct imports/re-exports for the browser. Older servers retain the resolved-record fallback.
+    pub fn references(&self) -> &[Value] {
+        self.scan
+            .get("fileReferences")
+            .and_then(Value::as_array)
+            .or_else(|| self.scan["records"].as_array())
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
     /// Crossing the selected group's boundary, rather than flattening all descendants.
     pub fn relations(&self, entry: &Entry, incoming: bool) -> Vec<(String, String)> {
         let mut found = BTreeSet::new();
-        for record in self.scan["records"].as_array().into_iter().flatten() {
+        for record in self.references() {
             let file = record["file"].as_str().unwrap_or_default();
             let provider = record["provider"].as_str().unwrap_or_default();
             let (inside, outside) = if incoming {
@@ -361,7 +370,35 @@ mod tests {
         assert_eq!(group.children.len(), 2);
         assert_eq!(
             snapshot.relations(group, false),
-            vec![("entities/product/model/product.ts".into(), "product".into())]
+            vec![("entities/product/index.ts".into(), "product".into())]
+        );
+        let index = snapshot
+            .tree
+            .find("features/cart/model/actions/index.ts")
+            .unwrap();
+        assert_eq!(
+            snapshot.relations(index, false),
+            vec![("features/cart/model/actions/add.ts".into(), "add".into())]
+        );
+        assert_eq!(
+            snapshot.relations(index, true),
+            vec![("features/cart/index.ts".into(), "add".into())]
+        );
+        let mut expanded = BTreeSet::new();
+        crate::repository_graph::reveal(&snapshot.tree, &index.path, &mut expanded);
+        let graph = crate::repository_graph::project(&snapshot, &expanded);
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|edge| edge.from == "features/cart/index.ts" && edge.to == index.path)
+        );
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|edge| edge.from == index.path
+                    && edge.to == "features/cart/model/actions/add.ts")
         );
         let node = snapshot.module(group);
         assert_eq!(node.path, "features/cart/model");

@@ -73,6 +73,14 @@ impl Workbench {
             .insert(egui::TextStyle::Button, egui::FontId::proportional(12.0));
         cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
         cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+        // Accept Ctrl+wheel on both platforms, as well as the standard macOS Cmd+wheel.
+        cc.egui_ctx.options_mut(|options| {
+            options.input_options.zoom_modifier = egui::Modifiers {
+                ctrl: true,
+                command: true,
+                ..Default::default()
+            };
+        });
         let (session, message, storage_enabled) = match storage::load() {
             Ok(session) => (
                 session,
@@ -539,11 +547,15 @@ impl Workbench {
                                 });
                                 ui.label(RichText::new(&entry.path).color(MUTED));
                                 ui.label(format!("파일 {}개", entry.file_count));
-                                if let Some(index) = &entry.index {
-                                    ui.label(
-                                        RichText::new(format!("공개 진입점: {index}"))
-                                            .color(ACCENT),
-                                    );
+                                if let Some(index) = &entry.index
+                                    && ui
+                                        .link(
+                                            RichText::new(format!("공개 진입점: {index}"))
+                                                .color(ACCENT),
+                                        )
+                                        .clicked()
+                                {
+                                    self.navigate(index);
                                 }
                                 ui.add_space(8.0);
                                 let valid_module = Plan {
@@ -617,10 +629,14 @@ impl Workbench {
                         self.inspected_path.clear();
                     }
                     ui.add(
-                        egui::Slider::new(&mut self.repository_graph.zoom, 0.35..=1.3)
-                            .show_value(false)
-                            .text("확대"),
-                    );
+                        egui::Slider::new(
+                            &mut self.repository_graph.zoom,
+                            canvas::GRAPH_ZOOM_MIN..=canvas::GRAPH_ZOOM_MAX,
+                        )
+                        .show_value(false)
+                        .text("확대"),
+                    )
+                    .on_hover_text("그래프 위에서 Ctrl+휠로 확대·축소할 수 있습니다.");
                     ui.add(
                         egui::TextEdit::singleline(&mut self.search)
                             .hint_text("이름·경로 검색")

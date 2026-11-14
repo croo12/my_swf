@@ -47,17 +47,21 @@ jobs:
           targets: ${{ matrix.rust-targets }}
       - name: Build Windows client
         if: runner.os == 'Windows'
-        run: cargo build -p factory-workbench --release --locked
-      - name: Package Windows client
+        run: |
+          ./scripts/native/prepare-router.ps1
+          cargo build -p factory-workbench --release --locked
+      - name: Publish single-file Windows client
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $archive = "factory-workbench-${env:TAG}-windows-x64.zip"
-          Compress-Archive -LiteralPath target/release/factory-workbench.exe,README.md,docs -DestinationPath $archive
-          gh release upload $env:TAG $archive --clobber
+          $executable = "target/factory-workbench-${env:TAG}-windows-x64.exe"
+          Copy-Item -LiteralPath target/release/factory-workbench.exe -Destination $executable
+          gh release upload $env:TAG $executable --clobber
       - name: Build macOS universal client
         if: runner.os == 'macOS'
         run: |
+          brew install automake libtool pkg-config
+          bash scripts/native/prepare-router.sh
           cargo build -p factory-workbench --release --locked --target aarch64-apple-darwin
           cargo build -p factory-workbench --release --locked --target x86_64-apple-darwin
           bash scripts/macos/package-native.sh "$TAG"
