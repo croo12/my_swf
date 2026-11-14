@@ -1,13 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod app;
 mod canvas;
-mod elk_routing;
-mod embedded_router;
-mod layout_engine;
 mod repository_graph;
-mod routing;
 mod storage;
 mod transport;
+
+#[cfg(test)]
+#[path = "../build_support/source_limits.rs"]
+mod source_limits;
 
 fn main() -> eframe::Result {
     let args: Vec<_> = std::env::args().collect();
@@ -16,14 +16,14 @@ fn main() -> eframe::Result {
             eprintln!("--export-router-sources <directory>");
             std::process::exit(2);
         };
-        if let Err(error) = embedded_router::export_sources(directory.as_ref()) {
+        if let Err(error) = factory_layout::export_sources(directory.as_ref()) {
             eprintln!("{error}");
             std::process::exit(1);
         }
         return Ok(());
     }
     if args.get(1).map(String::as_str) == Some("--check-router") {
-        if let Err(error) = elk_routing::check_runtime() {
+        if let Err(error) = factory_layout::check_runtime() {
             eprintln!("{error}");
             std::process::exit(1);
         }
@@ -49,9 +49,9 @@ fn main() -> eframe::Result {
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_inner_size([1440.0, 940.0])
         .with_min_inner_size([960.0, 640.0]);
-    if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!(
-        "../../client/src-tauri/icons/128x128.png"
-    )) {
+    if let Ok(icon) =
+        eframe::icon_data::from_png_bytes(include_bytes!("../assets/icons/128x128.png"))
+    {
         viewport = viewport.with_icon(icon);
     }
     let options = eframe::NativeOptions {

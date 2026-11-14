@@ -2,3 +2,5 @@
 /data/
 .DS_Store
 .env
+# Local build caches left behind by the retired Tauri client.
+/apps/client/

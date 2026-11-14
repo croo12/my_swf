@@ -6,7 +6,7 @@ app="target/native-single-bundle/Planning Workbench.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 lipo -create target/aarch64-apple-darwin/release/factory-workbench \
   target/x86_64-apple-darwin/release/factory-workbench -output "$app/Contents/MacOS/factory-workbench"
-cp apps/client/src-tauri/icons/icon.icns "$app/Contents/Resources/icon.icns"
+cp apps/native/assets/icons/icon.icns "$app/Contents/Resources/icon.icns"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -1,5 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["crates/factory-core", "crates/factory-server", "apps/native"]
-# The previous WebView client is retained as a UI reference and for JSON migration.
-exclude = ["apps/client/src-tauri"]
+members = ["crates/factory-core", "crates/factory-layout", "crates/factory-server", "apps/native"]

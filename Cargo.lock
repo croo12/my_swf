@@ -1176,6 +1176,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "factory-layout"
+version = "0.2.0"
+dependencies = [
+ "elk-layout",
+ "emath",
+ "factory-core",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "factory-server"
 version = "0.1.8"
 dependencies = [
@@ -1193,14 +1205,13 @@ name = "factory-workbench"
 version = "0.2.0"
 dependencies = [
  "eframe",
- "elk-layout",
  "factory-core",
+ "factory-layout",
  "keyring",
  "reqwest",
  "rfd",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
 ]
 

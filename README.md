@@ -9,7 +9,7 @@
 
 Rust 1.95 이상이 필요합니다. Windows에는 MSVC C++ Build Tools, macOS에는 Xcode Command Line Tools가 필요합니다.
 
-개발 빌드에서 먼저 앱에 내장할 연결선 라우터를 준비합니다. Windows는 고정된 SHA256으로 검증한 upstream 실행 파일을 받고, macOS는 같은 소스에서 서명된 universal 실행 파일을 빌드합니다. `build.rs`가 계산기·라이선스·원본 소스를 앱 실행 파일에 포함합니다.
+개발 빌드에서 먼저 앱에 내장할 연결선 라우터를 준비합니다. Windows는 고정된 SHA256으로 검증한 upstream 실행 파일을 받고, macOS는 같은 소스에서 서명된 universal 실행 파일을 빌드합니다. `crates/factory-layout/build.rs`가 계산기·라이선스·원본 소스를 앱 실행 파일에 포함합니다.
 
 ```powershell
 # Windows, 저장소 루트에서 한 번 실행
@@ -84,35 +84,49 @@ Windows PowerShell에서는 `export NAME=value` 대신 `$env:NAME = 'value'`를 
 
 ```text
 apps/native/                  Rust 네이티브 클라이언트
-  src/app.rs                  화면 구성, 탐색, 수동 편집, 파일 작업
-  src/canvas.rs               기존 스타일의 카드와 레이어별 계획 그래프
-  src/repository_graph.rs     그룹 안에서 펼치고 접는 중첩 저장소 그래프
-  src/layout_engine.rs        ELK 중첩 배치 / 직각 경로 어댑터
-  src/elk_routing.rs          고정 카드 구조의 ELK Libavoid 네이티브 연결선
-  src/embedded_router.rs     내장 계산기의 자동 준비·검증·캐시와 소스 내보내기
-  src/layout_comparison.rs    같은 저장소로 두 배치의 JSON / SVG / 지표 생성
-  src/routing.rs              연결 지점 배정과 비교용 이전 연결선 알고리즘
+  build.rs                   Rust 파일별 400줄 제한 검사
+  assets/icons/              Windows / macOS 공용 앱 아이콘
+  src/app/                   앱 상태, 계획 편집, 저장소 탐색, 파일·연결 작업
+  src/canvas/                카드, 계획 그래프, 커서 기준 확대·축소
+  src/repository_graph/      중첩 그래프 UI, 비동기 작업, 그리기와 비교 CLI
   src/storage.rs              로컬 초안 자동 저장
   src/transport.rs            선택적인 원격 구조 조회 / OS 토큰 저장
+crates/factory-layout/        UI와 독립적인 그래프 배치·연결선 계산
+  src/scene.rs               화면에 전달할 카드·연결선 좌표
+  src/arrangement.rs         한 줄 계층 배치와 선택 카드 정렬
+  src/focus.rs               선택 경계와 직접 연결 관계
+  src/layout_engine.rs       ELK 중첩 배치 어댑터
+  src/elk_routing.rs         고정 카드 구조의 ELK Libavoid 연결선
+  src/embedded_router.rs     내장 계산기의 준비·검증·캐시와 소스 내보내기
+  src/routing.rs             연결 지점 배정과 비교용 이전 알고리즘
 crates/factory-core/          클라이언트와 서버가 공유하는 Rust 코드
   src/graph.rs                기존 FSD / import 스캐너
   src/repository.rs           재귀 계층, index 그룹, 그룹 경계의 import 관계
   src/repository_graph.rs     펼침 상태에 따른 그래프와 import 집계
   src/plan.rs                 계획 JSON 호환, 기본 무결성 검사, Markdown 출력
 crates/factory-server/        기존 Axum 서버 + 읽기 전용 계층 API
-apps/client/                  기존 Tauri / React UI와 아이콘 (이전 버전 참고용)
 scripts/macos/                서버 운영 스크립트와 네이티브 .app 패키징
 ```
 
 화면 공용 코드에 Windows/macOS API를 섞지 않고 저장·통신을 분리했습니다. Android 패키징과 작은 화면용 UI는 후속 범위입니다. Android 앱 빌드가 제공되는 것은 아닙니다.
 
+`apps/native`의 모든 Rust 파일은 **파일당 400줄 이하**여야 합니다. 빈 줄·주석·테스트·빌드 스크립트도 포함하며, 아직 모듈에 연결하지 않은 새 파일도 검사합니다. 401줄부터 로컬 Cargo 빌드·검사·테스트와 CI가 실패합니다. 빌드 산출물인 `target`은 제외합니다. 화면 기능은 하위 모듈로 나누고, 재사용할 수 있는 계산·데이터 로직은 공유 crate에 둡니다. 기존 Tauri 클라이언트 코드는 Git 이력에서 확인할 수 있습니다.
+
+각 클론에서 한 번 Git 훅을 연결하면 **커밋 단계에서 먼저 차단**합니다.
+
+```sh
+git config --local core.hooksPath .githooks
+```
+
+Windows Git Bash와 macOS에서 동작하며 Rust 개발 환경의 `rustc`만 사용합니다. Cargo 빌드나 외부 패키지 설치는 하지 않습니다. 훅은 Git 인덱스에 들어 있는 모든 네이티브 Rust 파일을 검사하므로, 부분 스테이징·이름 변경·삭제도 실제 커밋 내용에 맞게 처리합니다. 작업 폴더에서 파일을 줄였더라도 스테이징된 버전이 401줄이면 커밋이 실패합니다. 새 클론에는 위 설정을 다시 적용해야 합니다.
+
 ## 확인
 
 ```sh
 cargo test -p factory-core -p factory-server --locked
-cargo test -p factory-workbench --locked
-cargo clippy -p factory-workbench --locked -- -D warnings
-cargo fmt -p factory-workbench -- --check
+cargo test -p factory-layout -p factory-workbench --locked
+cargo clippy -p factory-layout -p factory-workbench --all-targets --locked -- -D warnings
+cargo fmt -p factory-layout -p factory-workbench -- --check
 cargo build -p factory-workbench --release --locked
 
 # 같은 입력으로 ELK / 이전 배치의 계산 시간과 겹침 비교
@@ -121,4 +135,4 @@ cargo run -p factory-workbench --release --locked -- --compare-layout /path/to/r
 
 비교 결과는 `report.json`, 시나리오별 `*-input.json`, `*-elk.json`, `*-elk.svg`, `*-previous.svg`로 저장됩니다. Layer / Slice 전체 화면을 비교하고, `features/variants-filter`가 있으면 실제 중첩 API·index 그룹도 비교합니다. 지표는 단일 로컬 실행의 측정값이며 `milliseconds`에는 소스 분석 시간이 포함되지 않습니다.
 
-[현재 구조와 데이터 흐름](docs/ARCHITECTURE.md), [이전 Tauri 실행 안내](docs/LEGACY-TAURI.md), [이전 AI 계획 생성 계약](docs/LEGACY-PLANNING.md).
+[현재 구조와 데이터 흐름](docs/ARCHITECTURE.md), [이전 AI 계획 생성 계약](docs/LEGACY-PLANNING.md).

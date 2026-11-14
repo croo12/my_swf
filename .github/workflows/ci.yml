@@ -6,23 +6,16 @@ on:
   pull_request:
 
 jobs:
-  client:
-    name: client checks
+  native-source-limits:
+    name: native Rust source limits
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/client
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: apps/client/package-lock.json
-      - run: npm ci
-      # Type check, oxlint, Feature-Sliced Design rules (steiger), and oxfmt formatting.
-      - run: npm run check
-      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      # Run the same Cargo build guard without fetching dependencies or preparing the router.
+      - run: |
+          rustc --edition=2024 apps/native/build.rs -o "$RUNNER_TEMP/check-native-sources"
+          CARGO_MANIFEST_DIR="$GITHUB_WORKSPACE/apps/native" "$RUNNER_TEMP/check-native-sources"
 
   server:
     name: server build
@@ -35,6 +28,7 @@ jobs:
 
   native:
     name: native (${{ matrix.os }})
+    needs: native-source-limits
     strategy:
       fail-fast: false
       matrix:
@@ -54,9 +48,9 @@ jobs:
         run: |
           brew install automake libtool pkg-config
           bash scripts/native/prepare-router.sh
-      - run: cargo fmt -p factory-workbench -- --check
-      - run: cargo clippy -p factory-workbench --locked -- -D warnings
-      - run: cargo test -p factory-core -p factory-workbench --locked
+      - run: cargo fmt -p factory-workbench -p factory-layout -- --check
+      - run: cargo clippy -p factory-workbench -p factory-layout --all-targets --locked -- -D warnings
+      - run: cargo test -p factory-core -p factory-layout -p factory-workbench --locked
       - run: cargo build -p factory-workbench --release --locked
       - name: Check standalone Windows executable
         if: runner.os == 'Windows'

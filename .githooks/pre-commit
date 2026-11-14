@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd -- "$root"
+if ! command -v rustc >/dev/null 2>&1; then
+  echo "Commit blocked: rustc is required to check the native Rust source limit." >&2
+  exit 1
+fi
+
+directory="$(mktemp -d)"
+checker="$directory/check-native-sources.exe"
+cleanup() {
+  rm -f -- "$checker" "$directory/check-native-sources.pdb"
+  rmdir -- "$directory" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# Compile only the shared source rule and Git index reader; no Cargo dependencies or router.
+rustc --edition=2024 scripts/native/check-staged-sources.rs -o "$checker"
+"$checker"
