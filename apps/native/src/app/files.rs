@@ -72,6 +72,7 @@ impl Workbench {
         if self.busy {
             return;
         }
+        self.finish_edit();
         let text = match self.session.plan.json() {
             Ok(json) => {
                 if markdown {
@@ -137,6 +138,7 @@ impl Workbench {
                 | Event::Import(Err(error))
                 | Event::Export(Err(error)) => self.notify(error, true),
                 Event::Import(Ok(Some(plan))) => {
+                    self.finish_edit();
                     self.history.push(self.session.plan.clone());
                     self.redo.clear();
                     self.session.plan = plan;

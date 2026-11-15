@@ -2,7 +2,33 @@ use super::*;
 use factory_plan::Node;
 use factory_repository::Entry;
 impl Workbench {
+    pub(super) fn record_edit(&mut self, mut before: Plan) {
+        // Export can finish an earlier edit during this frame without changing content.
+        before.version = self.session.plan.version;
+        if before == self.session.plan {
+            return;
+        }
+        self.pending_edit.get_or_insert(before);
+        self.redo.clear();
+        self.last_edit = Instant::now();
+        self.dirty = true;
+    }
+
+    pub(super) fn finish_edit(&mut self) {
+        let Some(before) = self.pending_edit.take() else {
+            return;
+        };
+        if before != self.session.plan {
+            self.history.push(before);
+            if self.history.len() > 40 {
+                self.history.remove(0);
+            }
+            self.session.plan.version = self.session.plan.version.saturating_add(1);
+        }
+    }
+
     pub(super) fn undo(&mut self, redo: bool) {
+        self.finish_edit();
         self.history_action = true;
         let (source, target) = if redo {
             (&mut self.redo, &mut self.history)
@@ -56,6 +82,7 @@ impl Workbench {
             return;
         }
         // An explicit import is one undo step, even during pending session autosave.
+        self.finish_edit();
         self.history.push(self.session.plan.clone());
         if self.history.len() > 40 {
             self.history.remove(0);

@@ -23,6 +23,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+const EDIT_DELAY: Duration = Duration::from_millis(700);
+
 enum Event {
     Repository(Result<Snapshot, String>, bool),
     Import(Result<Option<Plan>, String>),
@@ -40,6 +42,7 @@ pub struct Workbench {
     selected: Option<String>,
     history: Vec<Plan>,
     redo: Vec<Plan>,
+    pending_edit: Option<Plan>,
     last_edit: Instant,
     dirty: bool,
     storage_enabled: bool,
@@ -118,6 +121,7 @@ impl Workbench {
             selected: None,
             history: vec![],
             redo: vec![],
+            pending_edit: None,
             last_edit: Instant::now(),
             dirty: false,
             storage_enabled,
@@ -149,6 +153,7 @@ impl Workbench {
     }
 
     fn persist(&mut self) {
+        self.finish_edit();
         if self.storage_enabled && self.dirty {
             match self.files.save(&self.session) {
                 Ok(()) => self.dirty = false,
@@ -166,6 +171,9 @@ impl Workbench {
 
 impl eframe::App for Workbench {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.last_edit.elapsed() >= EDIT_DELAY {
+            self.finish_edit();
+        }
         self.receive();
         self.history_action = false;
         let before = self.session.plan.clone();
@@ -224,23 +232,15 @@ impl eframe::App for Workbench {
             self.repository_ui(ui);
         }
         self.connection(ui.ctx());
-        if before != self.session.plan && !self.history_action {
-            if !self.dirty || self.last_edit.elapsed() > Duration::from_millis(700) {
-                self.history.push(before);
-                if self.history.len() > 40 {
-                    self.history.remove(0);
-                }
-            }
-            self.redo.clear();
-            self.session.plan.version = self.session.plan.version.saturating_add(1);
-            self.last_edit = Instant::now();
-            self.dirty = true;
+        if !self.history_action {
+            self.record_edit(before);
         }
         if self.dirty {
-            if self.last_edit.elapsed() >= Duration::from_millis(700) {
+            if self.last_edit.elapsed() >= EDIT_DELAY {
                 self.persist();
             } else {
-                ui.ctx().request_repaint_after(Duration::from_millis(700));
+                ui.ctx()
+                    .request_repaint_after(EDIT_DELAY.saturating_sub(self.last_edit.elapsed()));
             }
         }
     }

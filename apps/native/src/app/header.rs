@@ -47,6 +47,7 @@ impl Workbench {
                                 ui.close();
                             }
                             if ui.button("Markdown 복사").clicked() {
+                                self.finish_edit();
                                 match self.session.plan.json() {
                                     Ok(_) => {
                                         ui.ctx().copy_text(self.session.plan.markdown());
@@ -75,7 +76,10 @@ impl Workbench {
                                 self.undo(true);
                             }
                             if ui
-                                .add_enabled(!self.history.is_empty(), egui::Button::new("↶"))
+                                .add_enabled(
+                                    !self.history.is_empty() || self.pending_edit.is_some(),
+                                    egui::Button::new("↶"),
+                                )
                                 .on_hover_text("되돌리기")
                                 .clicked()
                             {
@@ -94,12 +98,14 @@ impl Workbench {
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     if self.planning {
-                        ui.label(RichText::new("직접 작성하는 구현 계획").color(ACCENT));
+                        let label =
+                            ui.label(RichText::new("직접 작성하는 구현 계획").color(ACCENT));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.session.plan.summary)
                                 .hint_text("이 계획으로 무엇을 변경하나요?")
                                 .desired_width(420.0),
-                        );
+                        )
+                        .labelled_by(label.id);
                         ui.add(
                             egui::Slider::new(&mut self.zoom, 0.6..=1.3)
                                 .show_value(false)

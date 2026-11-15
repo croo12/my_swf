@@ -67,6 +67,8 @@ Files are relative to each plan item's placement. Slice targets such as `feature
 
 JSON is the full editable record. Markdown includes the summary, modules, responsibilities, files, interface contracts, relation kinds/used names, and recorded request text. Exported Markdown is a handoff document; exporting never calls an AI service.
 
+The workbench groups continuous plan edits until 700 ms of inactivity. Each completed content change creates one undo entry and increments the plan version once; typing back to the starting content creates neither. Pending edits are completed before undo, explicit repository imports, successful plan replacement, export, clipboard copy and exit. Session metadata changes do not join plan undo transactions. Imported versions and undo/redo snapshots retain their version numbers.
+
 ## HTTP
 
 | Method | Route | Behavior |
@@ -83,7 +85,7 @@ The native UI has headless regression tests under `apps/native/src/app/tests`, u
 
 Feature tests additionally cover importing a real repository group into a plan, authenticated requests from `factory-remote-repository` to the real server router, credential-safe URL and redirect handling, worker request coalescing and recovery after a calculation panic, and standalone layout comparison JSON/SVG exports. These checks run without a desktop session or external AI service.
 
-`FileAccess` injects the session path and a `FileDialogs` implementation. Production uses the original OS locations and rfd dialogs; each test supplies an isolated temporary profile and scripted selections. Tests do not change process environment variables. Repository tests scan a small on-disk FSD fixture and exercise the actual background layout worker and embedded router. Readiness checks account for pending requests, expansion revisions and selection changes; they wait with a deadline rather than relying on a fixed number of frames for asynchronous completion. App editing and autosave timing remain unchanged. These tests do not claim OS-window, system-dialog, keychain or GPU-renderer coverage.
+`FileAccess` injects the session path and a `FileDialogs` implementation. Production uses the original OS locations and rfd dialogs; each test supplies an isolated temporary profile and scripted selections. Tests do not change process environment variables. Repository tests scan a small on-disk FSD fixture and exercise the actual background layout worker and embedded router. Readiness checks account for pending requests, expansion revisions and selection changes; they wait with a deadline rather than relying on a fixed number of frames for asynchronous completion. Edit tests type characters across UI frames, advance the idle deadline, and check versions, undo/redo, export and persisted plans. These tests do not claim OS-window, system-dialog, keychain or GPU-renderer coverage.
 
 The native client uses egui/eframe with the Glow renderer. No WebView is created. Directory scanning, network requests and native file dialogs run on worker threads and wake the UI on completion. Repaints are event-driven, except while a progress indicator or delayed autosave needs a frame. No permanent polling timer is used. Resource usage still requires measurements on representative repositories and each target platform.
 

@@ -98,6 +98,11 @@ impl Driver {
         self.pump();
     }
 
+    pub fn idle(&mut self) {
+        self.h.state_mut().last_edit = Instant::now() - EDIT_DELAY;
+        self.pump();
+    }
+
     pub fn pump(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut stable_frames = 0;

@@ -9,6 +9,7 @@ fn headless_add_edit_undo_and_redo_use_the_real_workbench() {
     assert_eq!(driver.h.state().session.plan.nodes.len(), 1);
     driver.replace("이름", "Edited module");
     assert_eq!(driver.h.state().session.plan.nodes[0].name, "Edited module");
+    driver.idle();
     let edited = driver.h.state().session.plan.clone();
     driver.click("↶");
     assert_ne!(driver.h.state().session.plan, edited);

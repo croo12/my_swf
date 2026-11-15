@@ -1,3 +1,4 @@
+mod edits;
 mod files;
 mod fixture;
 mod plan;
