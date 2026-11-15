@@ -105,8 +105,13 @@ impl View {
         let fit = status::controls(ui, selected, self.pending);
         self.update_scene(ui.ctx(), snapshot, selected);
         if let Some(error) = &self.error {
-            ui.colored_label(Color32::LIGHT_RED, error);
-            return;
+            ui.colored_label(
+                Color32::LIGHT_RED,
+                "연결선을 계산하지 못했습니다. 카드 탐색은 계속 사용할 수 있습니다.",
+            );
+            ui.collapsing("오류 상세", |ui| {
+                ui.label(error);
+            });
         }
         let Some(scene) = self.scene.as_ref() else {
             ui.label("중첩 그래프와 연결선을 배치하고 있습니다…");
@@ -117,7 +122,7 @@ impl View {
                 .clamp(canvas::GRAPH_ZOOM_MIN, canvas::GRAPH_ZOOM_MAX);
             self.fit_on_complete = false;
         }
-        status::summary(ui, scene, selected, self.elapsed);
+        status::summary(ui, scene, selected, self.elapsed, self.error.is_some());
         self.viewport(ui, selected);
     }
 }

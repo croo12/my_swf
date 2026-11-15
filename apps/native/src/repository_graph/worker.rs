@@ -1,5 +1,5 @@
 use super::*;
-use factory_layout::worker::Request;
+use factory_layout::worker::{Request, Response};
 
 impl View {
     pub(super) fn update_scene(
@@ -34,29 +34,51 @@ impl View {
             {
                 self.error = Some("레이아웃 작업을 시작하지 못했습니다.".into());
                 self.pending = false;
+                self.scene = Some(Scene::arrange(
+                    repository_graph::project(snapshot, &self.expanded),
+                    selected,
+                ));
             }
             self.snapshot = Some(snapshot.clone());
             self.built_revision = self.revision;
         }
         self.routed_selection = selected.to_owned();
-        if let Some(worker) = &self.worker {
-            while let Some(response) = worker.try_recv() {
-                if response.id != self.request {
-                    continue;
-                }
-                self.pending = false;
-                self.elapsed = response.elapsed;
-                match response.result {
-                    Ok(scene) => {
-                        self.scene = Some(scene);
-                        self.error = None;
-                    }
-                    Err(error) => {
-                        self.scene = None;
-                        self.error = Some(error);
-                    }
-                }
+        while let Some(response) = self.worker.as_ref().and_then(Worker::try_recv) {
+            self.apply_response(response, snapshot, selected);
+        }
+    }
+
+    fn apply_response(&mut self, response: Response, snapshot: &Snapshot, selected: &str) {
+        if response.id != self.request {
+            return;
+        }
+        self.pending = false;
+        self.elapsed = response.elapsed;
+        match response.result {
+            Ok(scene) => {
+                self.scene = Some(scene);
+                self.error = None;
+            }
+            Err(error) => {
+                self.scene = Some(Scene::arrange(
+                    repository_graph::project(snapshot, &self.expanded),
+                    selected,
+                ));
+                self.error = Some(error);
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_routing_failure(&mut self, snapshot: &Snapshot, selected: &str) {
+        self.apply_response(
+            Response {
+                id: self.request,
+                result: Err("Test routing failure".into()),
+                elapsed: Duration::ZERO,
+            },
+            snapshot,
+            selected,
+        );
     }
 }

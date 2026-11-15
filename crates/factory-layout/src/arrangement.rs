@@ -67,7 +67,8 @@ fn measure<'a>(node: &'a Node, focus: &Focus, dock: Option<f32>) -> Branch<'a> {
 }
 
 impl Scene {
-    pub(crate) fn arrange(graph: Graph, selected: &str) -> Self {
+    /// Arrange the cards without routing edges, including when a routing backend is unavailable.
+    pub fn arrange(graph: Graph, selected: &str) -> Self {
         fn flatten(
             branch: &Branch<'_>,
             origin: Pos2,

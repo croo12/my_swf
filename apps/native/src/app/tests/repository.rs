@@ -204,3 +204,35 @@ fn headless_slice_import_includes_all_files_supports_undo_and_rejects_duplicates
     assert_eq!(driver.h.state().message, "이 그룹은 이미 계획에 있습니다.");
     assert!(driver.dialogs.exhausted());
 }
+
+#[test]
+fn headless_routing_failure_keeps_cards_clickable_and_recovers_on_another_selection() {
+    let mut driver = Driver::new(Plan::default());
+    let repository = fixture::repository(driver.root.path());
+    driver.dialogs.push(Selection::Repository, Some(repository));
+    driver.click("폴더 열기");
+    driver.click("features 레이어 펼치기");
+    driver.click("features/cart 선택");
+    let snapshot = driver.h.state().repository.clone().unwrap();
+    driver
+        .h
+        .state_mut()
+        .repository_graph
+        .test_routing_failure(&snapshot, "features/cart");
+    driver.h.step();
+    driver
+        .h
+        .get_by_label("연결선을 계산하지 못했습니다. 카드 탐색은 계속 사용할 수 있습니다.");
+    driver.h.get_by_label("features/checkout 선택").click();
+    driver.h.step();
+    assert_eq!(driver.h.state().inspected_path, "features/checkout");
+    driver.pump();
+    assert!(
+        driver
+            .scene()
+            .edges
+            .iter()
+            .any(|route| !route.points.is_empty())
+    );
+    assert!(driver.dialogs.exhausted());
+}

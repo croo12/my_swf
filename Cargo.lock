@@ -1179,7 +1179,7 @@ dependencies = [
 
 [[package]]
 name = "factory-layout"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "elk-layout",
  "emath",
@@ -1233,7 +1233,7 @@ dependencies = [
 
 [[package]]
 name = "factory-server"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axum",
  "factory-remote-repository",
@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "factory-workbench"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "eframe",
  "egui_kittest",

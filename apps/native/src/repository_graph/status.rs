@@ -17,11 +17,22 @@ pub(super) fn controls(ui: &mut egui::Ui, selected: &mut String, pending: bool) 
     fit
 }
 
-pub(super) fn summary(ui: &mut egui::Ui, scene: &Scene, selected: &str, elapsed: Duration) {
+pub(super) fn summary(
+    ui: &mut egui::Ui,
+    scene: &Scene,
+    selected: &str,
+    elapsed: Duration,
+    failed: bool,
+) {
     ui.horizontal_wrapped(|ui| {
         ui.label(
             egui::RichText::new(format!(
-                "ELK Libavoid · {:.0} ms",
+                "{} · {:.0} ms",
+                if failed {
+                    "연결선 계산 실패"
+                } else {
+                    "ELK Libavoid"
+                },
                 elapsed.as_secs_f64() * 1000.0
             ))
             .color(MUTED)

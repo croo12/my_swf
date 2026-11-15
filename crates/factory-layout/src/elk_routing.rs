@@ -1,12 +1,11 @@
 //! Fixed-node routing through the native backend used by ELK's Libavoid integration.
 //! The elk-rs 0.12.2 Libavoid provider is a no-op; call the same upstream server directly.
 use emath::{Pos2, Rect};
+mod process;
+mod spacing;
 use std::{
     fmt::Write as _,
-    io::{Read, Write},
-    process::{Command, Stdio},
-    sync::mpsc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub fn route(
@@ -17,6 +16,42 @@ pub fn route(
     if connections.is_empty() {
         return Ok(vec![]);
     }
+    let executable = crate::embedded_router::executable()?;
+    let timeout = Duration::from_secs(15);
+    let started = Instant::now();
+    let nudging = spacing::nudging_distance(connections, ports);
+    let request = build_request(obstacles, connections, ports, nudging);
+    let response = match process::execute(&executable, request, timeout) {
+        Ok(response) => response,
+        Err(error) if error.is_nudging_assertion() && nudging > 0.0 => {
+            // Some valid compound layouts trip Libavoid's optional separation solver.
+            // Keep the same native router and fixed pins; retry once without separation.
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return Err(error.to_string());
+            }
+            let request = build_request(obstacles, connections, ports, 0.0);
+            process::execute(&executable, request, remaining)
+                .map_err(|retry| format!("{error}\n간격 정리 없이 재계산 실패: {retry}"))?
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let routes = parse(&response, connections.len())?;
+    for (points, &(start, _, _, end)) in routes.iter().zip(ports) {
+        // Upstream prints six significant digits; tolerate its output rounding at large coordinates.
+        if points[0].distance(start) > 0.2 || points.last().unwrap().distance(end) > 0.2 {
+            return Err("ELK Libavoid가 지정한 연결 지점을 유지하지 못했습니다.".into());
+        }
+    }
+    Ok(routes)
+}
+
+fn build_request(
+    obstacles: &[Rect],
+    connections: &[(usize, usize)],
+    ports: &[(Pos2, Pos2, Pos2, Pos2)],
+    nudging: f32,
+) -> String {
     let mut request = String::from(concat!(
         "OPTION edgeRouting ORTHOGONAL\n",
         "PENALTY segmentPenalty 20\n",
@@ -24,13 +59,13 @@ pub fn route(
         "PENALTY clusterCrossingPenalty 4000\n",
         "PENALTY fixedSharedPathPenalty 2000\n",
         "PENALTY shapeBufferDistance 8\n",
-        "PENALTY idealNudgingDistance 12\n",
         "ROUTINGOPTION nudgeOrthogonalSegmentsConnectedToShapes false\n",
         "ROUTINGOPTION penaliseOrthogonalSharedPathsAtConnEnds true\n",
         "ROUTINGOPTION nudgeOrthogonalTouchingColinearSegments false\n",
-        "ROUTINGOPTION nudgeSharedPathsWithCommonEndPoint false\n",
-        "GRAPH\n"
+        "ROUTINGOPTION nudgeSharedPathsWithCommonEndPoint false\n"
     ));
+    let _ = writeln!(request, "PENALTY idealNudgingDistance {}", nudging);
+    request.push_str("GRAPH\n");
     for (i, rect) in obstacles.iter().enumerate() {
         let _ = writeln!(
             request,
@@ -75,66 +110,7 @@ pub fn route(
         );
     }
     request.push_str("GRAPHEND\n");
-    let executable = crate::embedded_router::executable()?;
-    let mut command = Command::new(executable);
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("ELK Libavoid 실행 실패: {error}"))?;
-    let mut output = child.stdout.take().unwrap();
-    let mut input = child.stdin.take().unwrap();
-    let (sender, receiver) = mpsc::channel();
-    let reader = std::thread::spawn(move || {
-        let mut text = String::new();
-        let result = output
-            .by_ref()
-            .take(16 * 1024 * 1024)
-            .read_to_string(&mut text)
-            .map(|_| text);
-        let _ = sender.send(result);
-    });
-    let written = input.write_all(request.as_bytes());
-    drop(input); // EOF finishes the one-shot native routing request.
-    if let Err(error) = written {
-        let _ = child.kill();
-        let _ = child.wait();
-        let _ = reader.join();
-        return Err(format!("ELK Libavoid 요청 실패: {error}"));
-    }
-    let response = receiver.recv_timeout(Duration::from_secs(15));
-    if response.is_err() {
-        let _ = child.kill();
-    }
-    let status = child.wait().map_err(|error| error.to_string())?;
-    let _ = reader.join();
-    let response = response
-        .map_err(|_| "ELK Libavoid 연결선 계산 시간이 초과되었습니다.".to_string())?
-        .map_err(|error| error.to_string())?;
-    if !status.success() {
-        return Err(format!("ELK Libavoid 종료 오류: {status}"));
-    }
-    let routes = parse(&response, connections.len())?;
-    for (points, &(start, _, _, end)) in routes.iter().zip(ports) {
-        // Upstream prints six significant digits; tolerate its output rounding at large coordinates.
-        if points[0].distance(start) > 0.2 || points.last().unwrap().distance(end) > 0.2 {
-            #[cfg(test)]
-            eprintln!(
-                "Expected {start:?} → {end:?}; actual {:?} → {:?}",
-                points[0],
-                points.last().unwrap()
-            );
-            return Err("ELK Libavoid가 지정한 연결 지점을 유지하지 못했습니다.".into());
-        }
-    }
-    Ok(routes)
+    request
 }
 
 /// Packaging smoke check: exercises the actual embedded runtime without opening a window.
@@ -194,16 +170,4 @@ fn parse(response: &str, count: usize) -> Result<Vec<Vec<Pos2>>, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn rejects_missing_duplicate_and_non_orthogonal_routes() {
-        for output in [
-            "LAYOUT\nDONE",
-            "LAYOUT\nEDGE 1=0 0 10 0\nEDGE 1=0 0 10 0\nDONE",
-            "LAYOUT\nEDGE 1=0 0 10 10\nDONE",
-        ] {
-            assert!(parse(output, 1).is_err());
-        }
-    }
-}
+mod tests;
