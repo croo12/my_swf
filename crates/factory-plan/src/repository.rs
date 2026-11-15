@@ -20,10 +20,8 @@ impl Node {
             .filter(|path| entry.path == *path || entry.path.starts_with(&format!("{path}/")))
             .max_by_key(|path| path.len())
             .map(str::to_owned)
-            .unwrap_or_else(|| {
-                // Whole slices/layers are imported as individual child groups by the UI.
-                entry.path.clone()
-            });
+            // A whole slice keeps its own path; its files remain relative to the slice.
+            .unwrap_or_else(|| entry.path.clone());
         let names: BTreeMap<String, String> = snapshot.scan["records"]
             .as_array()
             .into_iter()

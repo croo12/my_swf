@@ -79,7 +79,7 @@ impl Workbench {
                                             .fill(Color32::from_rgb(60, 47, 102)),
                                     )
                                     .on_disabled_hover_text(
-                                        "슬라이스 내부의 세그먼트·그룹·파일을 선택하세요.",
+                                        "레이어 아래의 슬라이스·세그먼트·그룹·파일을 선택하세요.",
                                     )
                                     .clicked()
                                 {

@@ -1202,7 +1202,7 @@ dependencies = [
 
 [[package]]
 name = "factory-plan"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "factory-repository",
  "serde",
@@ -1233,7 +1233,7 @@ dependencies = [
 
 [[package]]
 name = "factory-server"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum",
  "factory-remote-repository",
@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "factory-workbench"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "eframe",
  "egui_kittest",

@@ -157,3 +157,50 @@ fn headless_ctrl_wheel_zooms_only_the_graph_and_normal_wheel_keeps_its_scale() {
     driver.pump();
     assert_eq!(driver.h.state().repository_graph.zoom, after);
 }
+
+#[test]
+fn headless_slice_import_includes_all_files_supports_undo_and_rejects_duplicates() {
+    let mut driver = Driver::new(Plan::default());
+    let repository = fixture::repository(driver.root.path());
+    std::fs::write(
+        repository.join("src/features/cart/index.ts"),
+        "export { add } from './model';",
+    )
+    .unwrap();
+    let ui = repository.join("src/features/cart/ui");
+    std::fs::create_dir_all(&ui).unwrap();
+    std::fs::write(ui.join("cart.ts"), "export const Cart = () => 1;").unwrap();
+    driver.dialogs.push(Selection::Repository, Some(repository));
+    driver.click("폴더 열기");
+    driver.click("features 레이어 펼치기");
+    driver.click("features/cart 선택");
+    driver.click("이 그룹을 계획에 추가");
+    assert!(driver.h.state().planning);
+    let imported = driver.h.state().session.plan.clone();
+    assert_eq!(imported.nodes.len(), 1);
+    assert_eq!(imported.nodes[0].path, "features/cart");
+    let mut files = imported.nodes[0].files.clone();
+    files.sort();
+    assert_eq!(
+        files,
+        ["index.ts", "model/add.ts", "model/index.ts", "ui/cart.ts"]
+    );
+    assert!(imported.errors().is_empty());
+    let json = driver.root.path().join("slice-plan.json");
+    driver.dialogs.push(Selection::Json, Some(json.clone()));
+    driver.click("내보내기");
+    driver.click("JSON · 다시 편집할 계획");
+    assert_eq!(
+        Plan::from_json(&std::fs::read_to_string(json).unwrap()).unwrap(),
+        imported
+    );
+    driver.click("↶");
+    assert!(driver.h.state().session.plan.nodes.is_empty());
+    driver.click("↷");
+    assert_eq!(driver.h.state().session.plan, imported);
+    driver.click("저장소");
+    driver.click("이 그룹을 계획에 추가");
+    assert_eq!(driver.h.state().session.plan, imported);
+    assert_eq!(driver.h.state().message, "이 그룹은 이미 계획에 있습니다.");
+    assert!(driver.dialogs.exhausted());
+}

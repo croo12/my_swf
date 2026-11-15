@@ -165,12 +165,12 @@ impl Plan {
             let parts: Vec<_> = node.path.split('/').collect();
             let valid_path = match parts.first().copied() {
                 Some("app" | "shared") => parts.len() >= 2,
-                Some("pages" | "widgets" | "features" | "entities") => parts.len() >= 3,
+                Some("pages" | "widgets" | "features" | "entities") => parts.len() >= 2,
                 _ => false,
             };
             if !clean_relative(&node.path) || !valid_path {
                 errors.push(format!(
-                    "{}: Layer/Slice/Segment 경로를 확인하세요.",
+                    "{}: 레이어 아래의 슬라이스·세그먼트 경로를 확인하세요.",
                     node.name
                 ));
             }
@@ -275,6 +275,43 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn slice_targets_roundtrip_while_layer_roots_and_unsafe_paths_stay_invalid() {
+        let plan = Plan {
+            nodes: [
+                "pages/home",
+                "widgets/navigation",
+                "features/cart",
+                "entities/product",
+            ]
+            .into_iter()
+            .map(|path| Node {
+                path: path.into(),
+                files: vec!["index.ts".into()],
+                ..Default::default()
+            })
+            .collect(),
+            ..Default::default()
+        };
+        assert_eq!(Plan::from_json(&plan.json().unwrap()).unwrap(), plan);
+        for path in [
+            "features",
+            "shared",
+            "unknown/cart",
+            "features/../cart",
+            "features//cart",
+        ] {
+            let invalid = Plan {
+                nodes: vec![Node {
+                    path: path.into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            assert!(invalid.json().is_err(), "{path}");
+        }
+    }
+
     #[test]
     fn old_client_export_roundtrips_contracts_and_unknown_metadata() {
         let text = r#"{"schemaVersion":"0.3","plan":{"version":4,"nodes":[{"id":"a","name":"Cart","kind":"modify","path":"features/cart/model","description":"장바구니를 변경한다","files":["cart.ts"],"interfaces":[{"name":"add","kind":"function","inputs":["id: string"],"outputs":["void"],"condition":"추가할 때","result":"상품이 추가된다"}],"custom":"preserved"}],"edges":[],"requests":[]}}"#;
